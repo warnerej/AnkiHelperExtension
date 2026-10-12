@@ -1,0 +1,7 @@
+{
+    "base_url": "https://api.example.com",
+    "email": "you@example.com",
+    "password": "your-password",
+    "timeout_seconds": 15,
+    "debug_logging": false
+}

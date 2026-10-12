@@ -13,3 +13,6 @@ wheels/
 .env
 addon/vendor/
 *.ankiaddon
+addon/user_files/
+config.json
+.DS_Store
