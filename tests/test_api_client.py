@@ -260,3 +260,150 @@ def test_put_retries_on_502_but_not_422(backend, make_client):
     with pytest.raises(ApiError):
         make_client().put_daily_reviews(TodayStats(date(2026, 1, 31), 1, None, 0))
     assert backend.count("PUT", "/reviews/daily") == 1
+
+
+PROFILE = {
+    "username": "bob",
+    "start": "2026-01-02",
+    "end": "2026-01-31",
+    "days": [
+        {
+            "study_date": "2026-01-31",
+            "total_reviews": 10,
+            "retention": 90.0,
+            "study_minutes": 5,
+        },
+        {
+            "study_date": "2026-01-30",
+            "total_reviews": 4,
+            "retention": None,
+            "study_minutes": None,
+        },
+    ],
+}
+
+
+def test_get_profile_reviews_parses(backend, make_client):
+    backend.on("POST", "/auth/login", (200, tokens(1)))
+    backend.on("GET", "/profiles/bob/reviews", (200, PROFILE))
+    result = make_client().get_profile_reviews("bob")
+    assert [d.total_reviews for d in result.days] == [10, 4]
+    assert backend.calls[1].headers["Authorization"] == "Bearer access1"
+
+
+def test_friends_404_is_none_and_401_refreshes(backend, make_client):
+    backend.on("POST", "/auth/login", (200, tokens(1)))
+    backend.on("POST", "/auth/refresh", (200, tokens(2)))
+    backend.on("GET", "/profiles/bob/reviews", (401, {}), (200, PROFILE))
+    backend.on("GET", "/profiles/ghost/reviews", (404, {"detail": "no user"}))
+    result = make_client().get_friends_reviews(["bob", "ghost"])
+    assert result["bob"] is not None and result["ghost"] is None
+    assert backend.count("POST", "/auth/refresh") == 1
+
+
+def test_friends_502_retried_then_raises(backend, make_client):
+    backend.on("POST", "/auth/login", (200, tokens(1)))
+    backend.on("GET", "/profiles/bob/reviews", (502, {}))
+    with pytest.raises(ServerError):
+        make_client().get_friends_reviews(["bob"])
+    assert backend.count("GET", "/profiles/bob/reviews") == 3
+
+
+def test_friends_default_from_settings(backend, make_client, settings):
+    backend.on("POST", "/auth/login", (200, tokens(1)))
+    backend.on("GET", "/profiles/bob/reviews", (200, PROFILE))
+    import dataclasses
+
+    from addon.api_client import ApiClient
+
+    s = dataclasses.replace(settings, friends=("bob",))
+    client = ApiClient(lambda: s, transport=httpx.MockTransport(backend))
+    assert list(client.get_friends_reviews()) == ["bob"]
+
+
+SIGNUP_BODY = {"email": "a@b.c", "password": "pw-secret", "username": "bob"}
+
+
+def test_signup_adopts_tokens(backend, make_client):
+    backend.on(
+        "POST",
+        "/auth/signup",
+        (
+            201,
+            {
+                "user": {"id": "u1", "email": "a@b.c"},
+                "tokens": tokens(1),
+                "confirmation_required": False,
+            },
+        ),
+    )
+    backend.on("GET", "/auth/me", ME)
+    client = make_client()
+    result = client.signup("a@b.c", "pw-secret", "bob")
+    assert result.tokens is not None
+    assert backend.body(0) == SIGNUP_BODY
+    assert "Authorization" not in backend.calls[0].headers
+    client.get_me()
+    assert backend.count("POST", "/auth/login") == 0
+    assert backend.calls[-1].headers["Authorization"] == "Bearer access1"
+
+
+def test_signup_confirmation_required(backend, make_client):
+    backend.on(
+        "POST",
+        "/auth/signup",
+        (
+            201,
+            {
+                "user": {"id": "u1", "email": "a@b.c"},
+                "tokens": None,
+                "confirmation_required": True,
+            },
+        ),
+    )
+    assert make_client().signup("a@b.c", "pw-secret", "bob").confirmation_required
+
+
+def test_signup_409_and_422_not_retried(backend, make_client):
+    backend.on("POST", "/auth/signup", (409, {"detail": "taken"}))
+    with pytest.raises(ApiError, match="already taken"):
+        make_client().signup("a@b.c", "pw-secret", "bob")
+    backend.on("POST", "/auth/signup", (422, {"detail": "bad"}))
+    with pytest.raises(ApiError) as info:
+        make_client().signup("a@b.c", "x", "bob")
+    assert info.value.status_code == 422
+    assert backend.count("POST", "/auth/signup") == 2
+
+
+def test_signup_network_failure_not_retried(backend, make_client):
+    backend.on("POST", "/auth/signup", httpx.ConnectError("down"))
+    with pytest.raises(NetworkError):
+        make_client().signup("a@b.c", "pw-secret", "bob")
+    assert backend.count("POST", "/auth/signup") == 1
+
+
+def test_logout_204(backend, make_client):
+    backend.on("POST", "/auth/login", (200, tokens(1)), (200, tokens(2)))
+    backend.on("POST", "/auth/logout", (204, None))
+    backend.on("GET", "/auth/me", ME)
+    client = make_client()
+    client.get_me()
+    client.logout()
+    client.get_me()
+    assert backend.count("POST", "/auth/login") == 2
+
+
+def test_settings_username_and_friends():
+    base = {"base_url": "https://x.io", "email": "a", "password": "b"}
+    s = Settings.from_config(
+        {
+            **base,
+            "username": " Bob_1 ",
+            "friends": ["Al", "alice", "ALICE", "bad name", "x" * 21],
+        }
+    )
+    assert s.username == "bob_1" and s.friends == ("alice",)
+    with pytest.raises(NotConfiguredError):
+        Settings.from_config({**base, "username": "no way"})
+    assert Settings.from_config(base).friends == ()
+    assert "b" * 3 not in repr(Settings.from_config({**base, "password": "hunter2"}))

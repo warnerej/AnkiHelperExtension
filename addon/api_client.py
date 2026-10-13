@@ -1,13 +1,14 @@
 import random
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
-from .errors import AuthError, NetworkError, ServerError
+from .errors import ApiError, AuthError, NetworkError, ServerError
 from .log import get_logger
-from .models import DailyReview, UserResponse
+from .models import DailyReview, ProfileReviews, SignupResponse, UserResponse
 from .session import Session, check_response
 from .settings import Settings
 from .stats import TodayStats
@@ -110,6 +111,34 @@ class ApiClient:
             return UserResponse.model_validate(self.get("/auth/me").json())
         except ValueError as exc:
             raise ServerError("Unexpected response from /auth/me") from exc
+
+    def get_profile_reviews(self, username: str) -> ProfileReviews:
+        """A user's review rows for the past 30 days (404 raises ApiError)."""
+        path = f"/profiles/{quote(username, safe='')}/reviews"
+        try:
+            return ProfileReviews.model_validate(self.get(path).json())
+        except ValueError as exc:
+            raise ServerError(f"Unexpected response from {path}") from exc
+
+    def get_friends_reviews(
+        self, usernames: Iterable[str] | None = None
+    ) -> dict[str, ProfileReviews | None]:
+        """Fetch each friend's last 30 days. Unknown usernames map to None."""
+        if usernames is None:
+            usernames = self._get_settings().friends
+        result: dict[str, ProfileReviews | None] = {}
+        for name in usernames:
+            try:
+                result[name] = self.get_profile_reviews(name)
+            except ApiError as exc:
+                if exc.status_code != 404:
+                    raise
+                result[name] = None
+        return result
+
+    def signup(self, email: str, password: str, username: str) -> SignupResponse:
+        """Create an account (no bearer token, never retried)."""
+        return self._ensure_session().signup(email, password, username)
 
     def logout(self) -> None:
         if self._session is not None:

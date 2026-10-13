@@ -2,6 +2,8 @@
     "base_url": "https://api.example.com",
     "email": "you@example.com",
     "password": "your-password",
+    "username": "your_username",
+    "friends": ["friend_one", "friend_two"],
     "timeout_seconds": 15,
     "debug_logging": false
 }

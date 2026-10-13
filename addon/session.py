@@ -12,7 +12,7 @@ from .errors import (
     ServerError,
 )
 from .log import get_logger
-from .models import TokenResponse
+from .models import SignupResponse, TokenResponse
 from .settings import Settings
 
 REFRESH_MARGIN_SECONDS = 60
@@ -77,6 +77,26 @@ class Session:
             assert self._access is not None
             return self._access
 
+    def signup(self, email: str, password: str, username: str) -> SignupResponse:
+        """Create an account. Adopts the returned tokens when the server issues them."""
+        try:
+            resp = self._post(
+                "/auth/signup",
+                json={"email": email, "password": password, "username": username},
+            )
+        except ApiError as exc:
+            if exc.status_code == 409:
+                raise ApiError(409, "That username or email is already taken.") from exc
+            raise
+        try:
+            result = SignupResponse.model_validate(resp.json())
+        except ValueError as exc:
+            raise ServerError("Unexpected response from /auth/signup") from exc
+        if result.tokens is not None:
+            self.adopt_tokens(result.tokens)
+        log.info("signed up (confirmation_required=%s)", result.confirmation_required)
+        return result
+
     def logout(self) -> None:
         """Best-effort server logout, then always clear local state."""
         with self._lock:
@@ -94,14 +114,22 @@ class Session:
         self._refresh = None
         self._expires_at = 0.0
 
+    def adopt_tokens(self, tokens: TokenResponse) -> None:
+        """Use tokens obtained elsewhere (e.g. signup) as the current session."""
+        with self._lock:
+            self._set_tokens(tokens)
+
+    def _set_tokens(self, tokens: TokenResponse) -> None:
+        self._access = tokens.access_token
+        self._refresh = tokens.refresh_token
+        self._expires_at = self._clock() + tokens.expires_in
+
     def _store(self, resp: httpx.Response) -> None:
         try:
             tokens = TokenResponse.model_validate(resp.json())
         except ValueError as exc:  # pydantic ValidationError and JSON errors
             raise ServerError("Unexpected response from /auth") from exc
-        self._access = tokens.access_token
-        self._refresh = tokens.refresh_token
-        self._expires_at = self._clock() + tokens.expires_in
+        self._set_tokens(tokens)
 
     def _login(self) -> None:
         settings = self._get_settings()

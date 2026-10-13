@@ -1,9 +1,14 @@
+import re
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
 from .errors import NotConfiguredError
+from .log import get_logger
 
+log = get_logger()
+
+USERNAME_RE = re.compile(r"[a-z0-9_]{3,20}")
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 DEFAULT_TIMEOUT = 15.0
 
@@ -14,6 +19,8 @@ class Settings:
     email: str
     password: str
     timeout_seconds: float = DEFAULT_TIMEOUT
+    username: str = ""
+    friends: tuple[str, ...] = ()
 
     def __repr__(self) -> str:  # keep the password out of tracebacks and logs
         return (
@@ -41,4 +48,19 @@ class Settings:
             timeout = DEFAULT_TIMEOUT
         if timeout <= 0:
             timeout = DEFAULT_TIMEOUT
-        return cls(base_url, email, password, timeout)
+        username = str(config.get("username") or "").strip().lower()
+        if username and not USERNAME_RE.fullmatch(username):
+            raise NotConfiguredError(
+                "AnkiHelper: username must be 3-20 letters, digits or _."
+            )
+        raw_friends = config.get("friends")
+        friends: list[str] = []
+        if isinstance(raw_friends, list):
+            for item in raw_friends:
+                name = str(item).strip().lower()
+                if USERNAME_RE.fullmatch(name):
+                    if name not in friends:
+                        friends.append(name)
+                else:
+                    log.info("ignoring invalid friend username %r", name)
+        return cls(base_url, email, password, timeout, username, tuple(friends))

@@ -5,12 +5,12 @@ from typing import Any
 
 from aqt import gui_hooks, mw
 from aqt.qt import QAction
-from aqt.utils import showWarning, tooltip
+from aqt.utils import getText, showWarning, tooltip
 
 from .api_client import ApiClient
 from .errors import AnkiHelperError
 from .log import get_logger, setup_logging
-from .models import DailyReview, UserResponse
+from .models import DailyReview, ProfileReviews, SignupResponse, UserResponse
 from .settings import Settings
 from .stats import TodayStats, today_stats
 
@@ -32,6 +32,7 @@ class Controller:
         self.client = ApiClient(self._settings)
         self._last_pushed: TodayStats | None = None
         self._last_push_time = 0.0
+        self.friends_reviews: dict[str, ProfileReviews | None] = {}
         self.reload_config()
 
     def _settings(self) -> Settings:
@@ -150,6 +151,83 @@ class Controller:
             return
         tooltip(f"AnkiHelper: connected as {me.email or 'unknown user'}")
 
+    def fetch_friends(self, *, manual: bool = False) -> None:
+        """Load friends' last 30 days into `self.friends_reviews` (main thread)."""
+        assert mw is not None
+        self.reload_config()
+        mw.taskman.run_in_background(
+            self.client.get_friends_reviews,
+            lambda future: self._on_friends_result(future, manual),
+        )
+
+    def _on_friends_result(
+        self, future: Future[dict[str, ProfileReviews | None]], manual: bool
+    ) -> None:
+        try:
+            result = future.result()
+        except AnkiHelperError as exc:
+            log.info("friends fetch failed: %s", exc)
+            if manual:
+                showWarning(str(exc), title="AnkiHelper")
+            return
+        except Exception:
+            log.exception("unexpected error fetching friends")
+            if manual:
+                showWarning(
+                    "Unexpected error. See user_files/ankihelper.log.",
+                    title="AnkiHelper",
+                )
+            return
+        self.friends_reviews = result
+        found = sum(1 for v in result.values() if v is not None)
+        log.info("loaded reviews for %d/%d friends", found, len(result))
+        if manual:
+            tooltip(f"AnkiHelper: loaded {found} of {len(result)} friends")
+
+    def sign_up(self) -> None:
+        assert mw is not None
+        self.reload_config()
+        try:
+            settings = self._settings()
+        except AnkiHelperError as exc:
+            showWarning(str(exc), title="AnkiHelper")
+            return
+        username, ok = getText(
+            "Choose a username (3-20 letters, digits or _):",
+            parent=mw,
+            title="AnkiHelper: Sign up",
+            default=settings.username,
+        )
+        if not ok:
+            return
+        username = username.strip().lower()
+        mw.taskman.run_in_background(
+            lambda: self.client.signup(settings.email, settings.password, username),
+            lambda future: self._on_signup_result(future, username),
+        )
+
+    def _on_signup_result(self, future: Future[SignupResponse], username: str) -> None:
+        try:
+            result = future.result()
+        except AnkiHelperError as exc:
+            log.info("signup failed: %s", exc)
+            showWarning(str(exc), title="AnkiHelper")
+            return
+        except Exception:
+            log.exception("unexpected error during signup")
+            showWarning(
+                "Unexpected error. See user_files/ankihelper.log.", title="AnkiHelper"
+            )
+            return
+        if result.confirmation_required:
+            msg = "Account created. Confirm your email, then use Test connection."
+        else:
+            msg = "Account created and logged in."
+        showWarning(
+            f'{msg}\nAdd "username": "{username}" to the add-on config.',
+            title="AnkiHelper",
+        )
+
 
 def setup() -> Controller:
     assert mw is not None
@@ -160,6 +238,12 @@ def setup() -> Controller:
     push_action = QAction("AnkiHelper: Push today's reviews", mw)
     push_action.triggered.connect(lambda: controller.push_today(manual=True))
     mw.form.menuTools.addAction(push_action)
+    signup_action = QAction("AnkiHelper: Sign up", mw)
+    signup_action.triggered.connect(controller.sign_up)
+    mw.form.menuTools.addAction(signup_action)
+    friends_action = QAction("AnkiHelper: Refresh friends", mw)
+    friends_action.triggered.connect(lambda: controller.fetch_friends(manual=True))
+    mw.form.menuTools.addAction(friends_action)
     mw.addonManager.setConfigUpdatedAction(__name__, controller.on_config_updated)
     gui_hooks.profile_will_close.append(controller.on_profile_close)
     gui_hooks.sync_did_finish.append(controller.on_sync_finished)
