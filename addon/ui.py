@@ -1,4 +1,5 @@
 import time
+from collections.abc import Callable
 from concurrent.futures import Future
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,7 @@ from aqt.utils import getText, showWarning, tooltip
 
 from .api_client import ApiClient
 from .errors import AnkiHelperError
+from .heatmap import render_friends_html
 from .log import get_logger, setup_logging
 from .models import DailyReview, ProfileReviews, SignupResponse, UserResponse
 from .settings import Settings
@@ -17,6 +19,7 @@ from .stats import TodayStats, today_stats
 log = get_logger()
 
 PUSH_THROTTLE_SECONDS = 300
+FRIENDS_REFRESH_SECONDS = 300
 
 
 class Controller:
@@ -33,6 +36,7 @@ class Controller:
         self._last_pushed: TodayStats | None = None
         self._last_push_time = 0.0
         self.friends_reviews: dict[str, ProfileReviews | None] = {}
+        self._last_friends_fetch = 0.0
         self.reload_config()
 
     def _settings(self) -> Settings:
@@ -151,17 +155,23 @@ class Controller:
             return
         tooltip(f"AnkiHelper: connected as {me.email or 'unknown user'}")
 
-    def fetch_friends(self, *, manual: bool = False) -> None:
+    def fetch_friends(
+        self, *, manual: bool = False, on_loaded: Callable[[], None] | None = None
+    ) -> None:
         """Load friends' last 30 days into `self.friends_reviews` (main thread)."""
         assert mw is not None
         self.reload_config()
+        self._last_friends_fetch = time.monotonic()
         mw.taskman.run_in_background(
             self.client.get_friends_reviews,
-            lambda future: self._on_friends_result(future, manual),
+            lambda future: self._on_friends_result(future, manual, on_loaded),
         )
 
     def _on_friends_result(
-        self, future: Future[dict[str, ProfileReviews | None]], manual: bool
+        self,
+        future: Future[dict[str, ProfileReviews | None]],
+        manual: bool,
+        on_loaded: Callable[[], None] | None = None,
     ) -> None:
         try:
             result = future.result()
@@ -183,6 +193,22 @@ class Controller:
         log.info("loaded reviews for %d/%d friends", found, len(result))
         if manual:
             tooltip(f"AnkiHelper: loaded {found} of {len(result)} friends")
+        if on_loaded is not None:
+            on_loaded()
+
+    def on_deck_browser_render(self, _deck_browser: Any, content: Any) -> None:
+        """Append the friends heatmaps to the main screen, refreshing if stale."""
+        content.stats += render_friends_html(self.friends_reviews)
+        if time.monotonic() - self._last_friends_fetch >= FRIENDS_REFRESH_SECONDS:
+            self.fetch_friends(on_loaded=self._refresh_deck_browser)
+
+    def on_profile_open(self) -> None:
+        self.fetch_friends(on_loaded=self._refresh_deck_browser)
+
+    def _refresh_deck_browser(self) -> None:
+        assert mw is not None
+        if mw.state == "deckBrowser":
+            mw.deckBrowser.refresh()
 
     def sign_up(self) -> None:
         assert mw is not None
@@ -242,10 +268,16 @@ def setup() -> Controller:
     signup_action.triggered.connect(controller.sign_up)
     mw.form.menuTools.addAction(signup_action)
     friends_action = QAction("AnkiHelper: Refresh friends", mw)
-    friends_action.triggered.connect(lambda: controller.fetch_friends(manual=True))
+    friends_action.triggered.connect(
+        lambda: controller.fetch_friends(
+            manual=True, on_loaded=controller._refresh_deck_browser
+        )
+    )
     mw.form.menuTools.addAction(friends_action)
     mw.addonManager.setConfigUpdatedAction(__name__, controller.on_config_updated)
     gui_hooks.profile_will_close.append(controller.on_profile_close)
     gui_hooks.sync_did_finish.append(controller.on_sync_finished)
+    gui_hooks.profile_did_open.append(controller.on_profile_open)
+    gui_hooks.deck_browser_will_render_content.append(controller.on_deck_browser_render)
     gui_hooks.reviewer_did_answer_card.append(controller.on_card_answered)
     return controller
