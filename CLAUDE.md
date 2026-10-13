@@ -2,7 +2,7 @@
 
 Anki add-on (client) for AnkiHelper. It reads study stats from the local Anki collection, pushes them to the AnkiHelper FastAPI backend (Supabase-backed), and pulls stats back to display progress for the user and others. Backend context: `ANKI_HANDOFF.md`.
 
-**Status:** backend has auth only (`/auth/signup|login|refresh|me|logout`). Add-on code not started; stats routes/tables are undecided.
+**Status:** backend has auth (`/auth/signup|login|refresh|me|logout`), daily reviews (`PUT/GET /reviews/daily`, `GET /reviews/daily/{date}`) and friends (`GET /profiles/{username}/reviews`, past 30 days, 404 if unknown). The add-on implements login/refresh, signup, daily push and the friends fetch (usernames come from the `friends` config list; no friends-list endpoint exists). Endpoint details: `API_GUIDE.md`.
 
 ## Environment
 - `uv` project. Python is pinned to **3.13** because Anki bundles its own interpreter (not 3.14). Verify against the installed Anki (Help > About) before changing.
