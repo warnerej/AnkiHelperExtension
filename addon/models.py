@@ -1,3 +1,5 @@
+from datetime import date, datetime
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -14,3 +16,11 @@ class UserResponse(BaseModel):
 
     id: str | None = None
     email: str | None = None
+
+
+class DailyReview(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    study_date: date
+    total_reviews: int
+    updated_at: datetime

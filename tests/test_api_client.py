@@ -211,3 +211,45 @@ def test_settings_ok_and_password_hidden():
     )
     assert s.base_url == "http://localhost:8000" and s.timeout_seconds == 15
     assert "hunter2" not in repr(s)
+
+
+def test_put_daily_reviews_body_and_parse(backend, make_client):
+    from datetime import date
+
+    backend.on("POST", "/auth/login", (200, tokens(1)))
+    backend.on(
+        "PUT",
+        "/reviews/daily",
+        (
+            200,
+            {
+                "study_date": "2026-01-31",
+                "total_reviews": 42,
+                "updated_at": "2026-01-31T21:04:11.2+00:00",
+            },
+        ),
+    )
+    saved = make_client().put_daily_reviews(date(2026, 1, 31), 42)
+    assert saved.total_reviews == 42
+    assert backend.body(1) == {"total_reviews": 42, "study_date": "2026-01-31"}
+    assert backend.calls[1].headers["Authorization"] == "Bearer access1"
+
+
+def test_put_retries_on_502_but_not_422(backend, make_client):
+    from datetime import date
+
+    ok = {
+        "study_date": "2026-01-31",
+        "total_reviews": 1,
+        "updated_at": "2026-01-31T21:04:11+00:00",
+    }
+    backend.on("POST", "/auth/login", (200, tokens(1)))
+    backend.on("PUT", "/reviews/daily", (502, {"detail": "db"}), (200, ok))
+    make_client().put_daily_reviews(date(2026, 1, 31), 1)
+    assert backend.count("PUT", "/reviews/daily") == 2
+
+    backend.calls.clear()
+    backend.on("PUT", "/reviews/daily", (422, {"detail": "bad"}))
+    with pytest.raises(ApiError):
+        make_client().put_daily_reviews(date(2026, 1, 31), 1)
+    assert backend.count("PUT", "/reviews/daily") == 1

@@ -1,13 +1,14 @@
 import random
 import time
 from collections.abc import Callable
+from datetime import date
 from typing import Any
 
 import httpx
 
 from .errors import AuthError, NetworkError, ServerError
 from .log import get_logger
-from .models import UserResponse
+from .models import DailyReview, UserResponse
 from .session import Session, check_response
 from .settings import Settings
 
@@ -60,7 +61,7 @@ class ApiClient:
 
     def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         method = method.upper()
-        retries = GET_RETRIES if method == "GET" else 0
+        retries = GET_RETRIES if method in ("GET", "PUT") else 0
         for attempt in range(retries + 1):
             try:
                 return self._request_once(method, path, **kwargs)
@@ -84,6 +85,19 @@ class ApiClient:
 
     def post(self, path: str, **kwargs: Any) -> httpx.Response:
         return self.request("POST", path, **kwargs)
+
+    def put(self, path: str, **kwargs: Any) -> httpx.Response:
+        return self.request("PUT", path, **kwargs)
+
+    def put_daily_reviews(self, study_date: date, total_reviews: int) -> DailyReview:
+        """Upsert the running total for `study_date` (idempotent, safe to retry)."""
+        body = {"total_reviews": total_reviews, "study_date": study_date.isoformat()}
+        try:
+            return DailyReview.model_validate(
+                self.put("/reviews/daily", json=body).json()
+            )
+        except ValueError as exc:
+            raise ServerError("Unexpected response from /reviews/daily") from exc
 
     def get_me(self) -> UserResponse:
         try:
