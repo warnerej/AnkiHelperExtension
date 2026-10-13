@@ -3,7 +3,10 @@ from datetime import date
 from addon.heatmap import (
     HeatmapCell,
     build_grid,
+    compute_stats,
     format_tooltip,
+    legend_for,
+    level_for,
     render_friends_html,
 )
 from addon.models import FriendDay, ProfileReviews
@@ -65,8 +68,40 @@ def test_html_is_chronological_with_name_and_tooltips():
     first = html.index("Mon 14 Sep")
     last = html.index("Tue 13 Oct")
     assert first < last
-    assert "ah-cell lit" in html
+    assert "ah-q1" in html
     assert "5 reviews" in html
+    assert html.count("<style>") == 1
+
+
+def test_svg_labels_and_colours():
+    html = render_friends_html({"bob": profile([])})
+    assert html.count('x="0" y=') == 7
+    assert ">Sep<" in html and ">Oct<" in html
+    assert "ah-today" not in html
+    assert "rect.ah-cell.ah-q1{fill:" in html
+
+
+def test_level_for():
+    legend = [1, 2, 4]
+    assert level_for(0, legend) == 0
+    assert level_for(1, legend) == 2
+    assert level_for(3, legend) == 3
+    assert level_for(99, legend) == 4
+    assert len(legend_for(profile([]))) == 9
+
+
+def test_compute_stats():
+    days = [
+        FriendDay(study_date=date(2026, 9, 14), total_reviews=10),
+        FriendDay(study_date=date(2026, 9, 15), total_reviews=30),
+        FriendDay(study_date=date(2026, 10, 12), total_reviews=20),
+    ]
+    stats = compute_stats(profile(days))
+    assert stats.average == 20
+    assert stats.learned_percent == 10
+    assert stats.longest_streak == 2
+    assert stats.current_streak == 1  # today empty, yesterday active
+    assert compute_stats(profile([])) == (0, 0, 0, 0)
 
 
 def test_html_escapes_and_empty():
