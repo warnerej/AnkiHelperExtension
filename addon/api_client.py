@@ -1,7 +1,6 @@
 import random
 import time
 from collections.abc import Callable
-from datetime import date
 from typing import Any
 
 import httpx
@@ -11,6 +10,7 @@ from .log import get_logger
 from .models import DailyReview, UserResponse
 from .session import Session, check_response
 from .settings import Settings
+from .stats import TodayStats
 
 CONNECT_TIMEOUT = 5.0
 GET_RETRIES = 2
@@ -89,9 +89,15 @@ class ApiClient:
     def put(self, path: str, **kwargs: Any) -> httpx.Response:
         return self.request("PUT", path, **kwargs)
 
-    def put_daily_reviews(self, study_date: date, total_reviews: int) -> DailyReview:
-        """Upsert the running total for `study_date` (idempotent, safe to retry)."""
-        body = {"total_reviews": total_reviews, "study_date": study_date.isoformat()}
+    def put_daily_reviews(self, stats: TodayStats) -> DailyReview:
+        """Upsert the running stats for the day (idempotent, safe to retry)."""
+        body: dict[str, Any] = {
+            "total_reviews": stats.total_reviews,
+            "study_date": stats.study_date.isoformat(),
+            "study_minutes": stats.study_minutes,
+        }
+        if stats.retention is not None:
+            body["retention"] = stats.retention
         try:
             return DailyReview.model_validate(
                 self.put("/reviews/daily", json=body).json()

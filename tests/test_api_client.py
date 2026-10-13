@@ -11,6 +11,7 @@ from addon.errors import (
     ServerError,
 )
 from addon.settings import Settings
+from addon.stats import TodayStats
 
 from .conftest import tokens
 
@@ -229,9 +230,14 @@ def test_put_daily_reviews_body_and_parse(backend, make_client):
             },
         ),
     )
-    saved = make_client().put_daily_reviews(date(2026, 1, 31), 42)
+    saved = make_client().put_daily_reviews(TodayStats(date(2026, 1, 31), 42, 87.5, 32))
     assert saved.total_reviews == 42
-    assert backend.body(1) == {"total_reviews": 42, "study_date": "2026-01-31"}
+    assert backend.body(1) == {
+        "total_reviews": 42,
+        "study_date": "2026-01-31",
+        "study_minutes": 32,
+        "retention": 87.5,
+    }
     assert backend.calls[1].headers["Authorization"] == "Bearer access1"
 
 
@@ -245,11 +251,12 @@ def test_put_retries_on_502_but_not_422(backend, make_client):
     }
     backend.on("POST", "/auth/login", (200, tokens(1)))
     backend.on("PUT", "/reviews/daily", (502, {"detail": "db"}), (200, ok))
-    make_client().put_daily_reviews(date(2026, 1, 31), 1)
+    make_client().put_daily_reviews(TodayStats(date(2026, 1, 31), 1, None, 0))
     assert backend.count("PUT", "/reviews/daily") == 2
+    assert "retention" not in backend.body(2)
 
     backend.calls.clear()
     backend.on("PUT", "/reviews/daily", (422, {"detail": "bad"}))
     with pytest.raises(ApiError):
-        make_client().put_daily_reviews(date(2026, 1, 31), 1)
+        make_client().put_daily_reviews(TodayStats(date(2026, 1, 31), 1, None, 0))
     assert backend.count("PUT", "/reviews/daily") == 1

@@ -23,4 +23,6 @@ class DailyReview(BaseModel):
 
     study_date: date
     total_reviews: int
+    retention: float | None = None
+    study_minutes: float | None = None
     updated_at: datetime

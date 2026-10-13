@@ -1,6 +1,5 @@
 import time
 from concurrent.futures import Future
-from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +12,7 @@ from .errors import AnkiHelperError
 from .log import get_logger, setup_logging
 from .models import DailyReview, UserResponse
 from .settings import Settings
-from .stats import today_review_count
+from .stats import TodayStats, today_stats
 
 log = get_logger()
 
@@ -31,7 +30,7 @@ class Controller:
         self._addon = mw.addonManager.addonFromModule(__name__)
         self._config: dict[str, Any] = {}
         self.client = ApiClient(self._settings)
-        self._last_pushed: tuple[date, int] | None = None
+        self._last_pushed: TodayStats | None = None
         self._last_push_time = 0.0
         self.reload_config()
 
@@ -60,18 +59,18 @@ class Controller:
         def work() -> None:
             if reading is not None:
                 try:
-                    self.client.put_daily_reviews(*reading)
+                    self.client.put_daily_reviews(reading)
                 except AnkiHelperError as exc:
                     log.info("final review push failed: %s", exc)
             self.client.close()
 
         mw.taskman.run_in_background(work)
 
-    def _read_today(self) -> tuple[date, int] | None:
+    def _read_today(self) -> TodayStats | None:
         assert mw is not None
         if mw.col is None:
             return None
-        return today_review_count(mw.col)
+        return today_stats(mw.col)
 
     def push_today(self, *, manual: bool = False) -> None:
         """Send today's running review total. Must be called on the main thread."""
@@ -84,9 +83,8 @@ class Controller:
                 tooltip("AnkiHelper: reviews already up to date")
             return
         self._last_push_time = time.monotonic()
-        study_date, total = reading
         mw.taskman.run_in_background(
-            lambda: self.client.put_daily_reviews(study_date, total),
+            lambda: self.client.put_daily_reviews(reading),
             lambda future: self._on_push_result(future, reading, manual),
         )
 
@@ -100,7 +98,7 @@ class Controller:
     def _on_push_result(
         self,
         future: Future[DailyReview],
-        reading: tuple[date, int],
+        reading: TodayStats,
         manual: bool,
     ) -> None:
         try:
@@ -121,8 +119,14 @@ class Controller:
         self._last_pushed = reading
         log.info("pushed %d reviews for %s", saved.total_reviews, saved.study_date)
         if manual:
+            retention = (
+                f"{reading.retention:g}% retention"
+                if reading.retention is not None
+                else "no retention yet"
+            )
             tooltip(
-                f"AnkiHelper: saved {saved.total_reviews} reviews for {saved.study_date}"
+                f"AnkiHelper: saved {saved.total_reviews} reviews, {retention}, "
+                f"{reading.study_minutes} min for {saved.study_date}"
             )
 
     def test_connection(self) -> None:
