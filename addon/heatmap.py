@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from html import escape
@@ -75,6 +75,8 @@ _COLOURS = (
 _FACTORS = (0.125, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 4)
 _STREAK_STEPS = (0, 7, 14, 21, 30)
 _PERCENT_STEPS = (0, 25, 50, 60, 70, 80, 85, 90, 95, 99)
+VIEW_CMD = "ankihelper:view:"
+RETRY_CMD = "ankihelper:retry"
 _DAY_LETTERS = "MTWTFSS"
 _CELL = 10
 _PITCH = 12
@@ -178,6 +180,10 @@ _CSS = (
     """
 <style>
 .ah-friends { margin: 1.2em auto 0; text-align: left; display: inline-block; max-width: 100%; }
+.ah-bar { margin-bottom: 1em; }
+.ah-toggle { padding: 4px 14px; margin-right: 6px; border: 1px solid #888; border-radius: 3px;
+  background: transparent; color: inherit; cursor: pointer; }
+.ah-toggle.ah-active { background: #44a340; border-color: #44a340; color: #fff; }
 .ah-friend { margin-bottom: 1.6em; }
 .ah-scroll { overflow-x: auto; max-width: 100%; }
 .ah-name { font-weight: bold; margin-bottom: 6px; font-size: 14px; }
@@ -285,23 +291,61 @@ def render_stats_html(stats: HeatmapStats) -> str:
     )
 
 
+def _render_profile(name: str, profile: ProfileReviews | None, label: str = "") -> str:
+    title = escape(label or name)
+    if profile is None:
+        title = f"{escape(name)} (user not found)"
+        body = ""
+    else:
+        grid = _with_levels(build_grid(profile), legend_for(profile))
+        body = f'<div class="ah-scroll">{render_grid_html(grid)}</div>' + (
+            render_stats_html(compute_stats(profile))
+        )
+    return f'<div class="ah-friend"><div class="ah-name">{title}</div>{body}</div>'
+
+
 def render_friends_html(friends: dict[str, ProfileReviews | None]) -> str:
     """HTML block for the deck browser; empty when no friends are configured."""
     if not friends:
         return ""
-    blocks: list[str] = []
-    for name, profile in friends.items():
-        if profile is None:
-            title = f"{escape(name)} (user not found)"
-            body = ""
-        else:
-            title = escape(name)
-            grid = _with_levels(build_grid(profile), legend_for(profile))
-            body = (
-                f'<div class="ah-scroll">{render_grid_html(grid)}</div>'
-                + render_stats_html(compute_stats(profile))
-            )
-        blocks.append(
-            f'<div class="ah-friend"><div class="ah-name">{title}</div>{body}</div>'
-        )
+    blocks = [_render_profile(name, profile) for name, profile in friends.items()]
     return f'{_CSS}<div class="ah-friends">{"".join(blocks)}</div>{_JS}'
+
+
+def render_heatmap_html(
+    mine: ProfileReviews | None,
+    friends: Mapping[str, ProfileReviews | None],
+    view: str,
+    friends_status: str = "loaded",
+) -> str:
+    """Toggle bar plus either the user's own heatmap or the friends' ones."""
+
+    def button(target: str, text: str) -> str:
+        active = " ah-active" if view == target else ""
+        return (
+            f'<button class="ah-toggle{active}" '
+            f"onclick=\"pycmd('{VIEW_CMD}{target}')\">{text}</button>"
+        )
+
+    if view == "friends" and friends_status == "loading":
+        body = (
+            '<div class="ah-name">Loading friends...</div>'
+            "<div>The server may be waking up; this can take a couple of minutes.</div>"
+        )
+    elif view == "friends" and friends_status == "error":
+        body = (
+            '<div class="ah-name">Couldn\'t reach the server.</div>'
+            f'<button class="ah-toggle" onclick="pycmd(\'{RETRY_CMD}\')">Retry</button>'
+        )
+    elif view == "friends" and friends_status == "idle":
+        body = '<div class="ah-name">Loading friends...</div>'
+    elif view == "friends":
+        body = "".join(_render_profile(n, p) for n, p in friends.items())
+        if not body:
+            body = '<div class="ah-name">No friends configured</div>'
+    elif mine is not None:
+        body = _render_profile(mine.username, mine, label="My stats")
+    else:
+        body = ""
+    bar = f'<div class="ah-bar">{button("mine", "My stats")}{button("friends", "Friends")}</div>'
+    return f'{_CSS}<div class="ah-friends">{bar}{body}</div>{_JS}'

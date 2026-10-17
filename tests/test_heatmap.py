@@ -8,6 +8,7 @@ from addon.heatmap import (
     legend_for,
     level_for,
     render_friends_html,
+    render_heatmap_html,
 )
 from addon.models import FriendDay, ProfileReviews
 
@@ -124,3 +125,25 @@ def test_year_window():
     assert "Jan &#x27;26" in html or "Jan '26" in html
     assert 'class="ah-scroll"' in html
     assert compute_stats(p).learned_percent == 0
+
+
+def test_heatmap_toggle_views():
+    mine = profile([FriendDay(study_date=date(2026, 1, 5), total_reviews=3)])
+    friends = {"bob": profile([])}
+    own = render_heatmap_html(mine, friends, "mine")
+    assert "My stats" in own and "bob</div>" not in own
+    assert "ankihelper:view:friends" in own
+    other = render_heatmap_html(mine, friends, "friends")
+    assert "bob</div>" in other and "ah-friend" in other
+    assert "No friends configured" in render_heatmap_html(mine, {}, "friends")
+    assert "ah-toggle" in render_heatmap_html(None, {}, "mine")
+
+
+def test_heatmap_friends_status_states():
+    friends = {"bob": profile([])}
+    loading = render_heatmap_html(None, {}, "friends", "loading")
+    assert "Loading friends" in loading and "bob" not in loading
+    error = render_heatmap_html(None, {}, "friends", "error")
+    assert "ankihelper:retry" in error
+    assert "ah-friend" in render_heatmap_html(None, friends, "friends", "loaded")
+    assert "ankihelper:retry" not in render_heatmap_html(None, {}, "mine", "error")

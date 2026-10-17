@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 from anki.collection import Collection
 
-from addon.stats import DAY_SECONDS, TodayStats, today_stats
+from addon.stats import DAY_SECONDS, TodayStats, today_stats, year_stats
 
 
 @pytest.fixture
@@ -69,3 +69,23 @@ def test_study_minutes_rounded(col, time_ms, minutes):
     start = (col.sched.day_cutoff - DAY_SECONDS) * 1000
     add_review(col, start + 1000, time_ms=time_ms)
     assert today_stats(col).study_minutes == minutes
+
+
+def test_year_stats_buckets_by_day(col):
+    start = (col.sched.day_cutoff - DAY_SECONDS) * 1000
+    add_review(col, start + 1000, ease=3, time_ms=60000)
+    add_review(col, start + 2000, ease=1)
+    add_review(col, start - 5000)  # yesterday
+    add_review(col, start - 6000, ease=0)  # manual reschedule
+    add_review(col, start - 400 * DAY_SECONDS * 1000)  # outside the window
+    p = year_stats(col)
+    assert (p.end - p.start).days == 364
+    assert [d.total_reviews for d in p.days] == [1, 2]
+    today = p.days[-1]
+    assert today.study_date == p.end
+    assert today.retention == 50.0
+    assert today.study_minutes == 1
+
+
+def test_year_stats_empty(col):
+    assert year_stats(col).days == []
