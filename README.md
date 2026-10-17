@@ -5,7 +5,7 @@ Anki add-on client for AnkiHelper.
 ## Setup
 
 1. Copy `addon/config.example.json` to `addon/config.json` (this file is git-ignored, so your credentials stay local).
-2. Edit `addon/config.json`: set `base_url`, `email` and `password`. Optionally set `username` (used by Sign up) and `friends`, a list of usernames whose last 30 days of reviews to fetch. `http` is only allowed for `localhost`.
+2. Edit `addon/config.json`: set `base_url`, `email` and `password`. Optionally set `username` (used by Sign up) and `friends`, a list of usernames whose last year of reviews to fetch. `http` is only allowed for `localhost`.
 3. Install the vendored dependencies: `uv pip install --target addon/vendor --python 3.13 "httpx>=0.28.1" "pydantic>=2.14.1"`.
 4. With Anki closed, link the add-on: `ln -s "$PWD/addon" ~/Library/Application\ Support/Anki2/addons21/ankihelper`.
 5. In Anki, use Tools > AnkiHelper: Test connection. If you have no account yet, use Tools > AnkiHelper: Sign up.
@@ -27,6 +27,6 @@ Anki add-on client for AnkiHelper.
 | `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout` | Session handling |
 | `GET /auth/me` | Test connection |
 | `PUT /reviews/daily` | Push today's running totals |
-| `GET /profiles/{username}/reviews` | A friend's past 30 days (404 if no such user) |
+| `GET /profiles/{username}/reviews` | A friend's past year (404 if no such user) |
 
 See `API_GUIDE.md` for request and response details.

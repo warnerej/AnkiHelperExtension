@@ -16,6 +16,7 @@ from .stats import TodayStats
 CONNECT_TIMEOUT = 5.0
 GET_RETRIES = 2
 BACKOFF_BASE = 0.5
+HEATMAP_DAYS = 365
 
 log = get_logger()
 
@@ -112,18 +113,22 @@ class ApiClient:
         except ValueError as exc:
             raise ServerError("Unexpected response from /auth/me") from exc
 
-    def get_profile_reviews(self, username: str) -> ProfileReviews:
-        """A user's review rows for the past 30 days (404 raises ApiError)."""
+    def get_profile_reviews(
+        self, username: str, days: int = HEATMAP_DAYS
+    ) -> ProfileReviews:
+        """A user's review rows for the past `days` days (404 raises ApiError)."""
         path = f"/profiles/{quote(username, safe='')}/reviews"
         try:
-            return ProfileReviews.model_validate(self.get(path).json())
+            return ProfileReviews.model_validate(
+                self.get(path, params={"days": days}).json()
+            )
         except ValueError as exc:
             raise ServerError(f"Unexpected response from {path}") from exc
 
     def get_friends_reviews(
         self, usernames: Iterable[str] | None = None
     ) -> dict[str, ProfileReviews | None]:
-        """Fetch each friend's last 30 days. Unknown usernames map to None."""
+        """Fetch each friend's last year. Unknown usernames map to None."""
         if usernames is None:
             usernames = self._get_settings().friends
         result: dict[str, ProfileReviews | None] = {}

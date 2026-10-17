@@ -140,7 +140,10 @@ def _month_labels(grid: list[list[HeatmapCell | None]]) -> list[tuple[int, str]]
         starts_month = any(d.day == 1 for d in days)
         if (w == 0 or starts_month) and (not labels or w - labels[-1][0] >= 2):
             anchor = next((d for d in days if d.day == 1), days[0])
-            labels.append((w, f"{anchor:%b}"))
+            text = f"{anchor:%b}"
+            if anchor.month == 1:
+                text += f" '{anchor:%y}"
+            labels.append((w, text))
     return labels
 
 
@@ -174,8 +177,9 @@ def _colour_vars() -> str:
 _CSS = (
     """
 <style>
-.ah-friends { margin: 1.2em auto 0; text-align: left; display: inline-block; }
+.ah-friends { margin: 1.2em auto 0; text-align: left; display: inline-block; max-width: 100%; }
 .ah-friend { margin-bottom: 1.6em; }
+.ah-scroll { overflow-x: auto; max-width: 100%; }
 .ah-name { font-weight: bold; margin-bottom: 6px; font-size: 14px; }
 .ah-svg text { font: 11px sans-serif; fill: #888; }
 .ah-svg .ah-cell { fill: #eaeaea; shape-rendering: crispEdges; }
@@ -205,6 +209,9 @@ _CSS = (
 _JS = """
 <script>
 (function () {
+  document.querySelectorAll(".ah-scroll").forEach(function (el) {
+    el.scrollLeft = el.scrollWidth;
+  });
   if (window.ahTipReady) { return; }
   window.ahTipReady = true;
   var tip = document.createElement("div");
@@ -290,7 +297,10 @@ def render_friends_html(friends: dict[str, ProfileReviews | None]) -> str:
         else:
             title = escape(name)
             grid = _with_levels(build_grid(profile), legend_for(profile))
-            body = render_grid_html(grid) + render_stats_html(compute_stats(profile))
+            body = (
+                f'<div class="ah-scroll">{render_grid_html(grid)}</div>'
+                + render_stats_html(compute_stats(profile))
+            )
         blocks.append(
             f'<div class="ah-friend"><div class="ah-name">{title}</div>{body}</div>'
         )

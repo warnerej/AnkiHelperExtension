@@ -287,6 +287,7 @@ def test_get_profile_reviews_parses(backend, make_client):
     backend.on("POST", "/auth/login", (200, tokens(1)))
     backend.on("GET", "/profiles/bob/reviews", (200, PROFILE))
     result = make_client().get_profile_reviews("bob")
+    assert backend.calls[1].url.params["days"] == "365"
     assert [d.total_reviews for d in result.days] == [10, 4]
     assert backend.calls[1].headers["Authorization"] == "Bearer access1"
 

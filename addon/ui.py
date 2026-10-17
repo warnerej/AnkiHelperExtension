@@ -158,7 +158,7 @@ class Controller:
     def fetch_friends(
         self, *, manual: bool = False, on_loaded: Callable[[], None] | None = None
     ) -> None:
-        """Load friends' last 30 days into `self.friends_reviews` (main thread)."""
+        """Load friends' last year into `self.friends_reviews` (main thread)."""
         assert mw is not None
         self.reload_config()
         self._last_friends_fetch = time.monotonic()

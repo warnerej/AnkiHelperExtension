@@ -108,3 +108,19 @@ def test_html_escapes_and_empty():
     assert render_friends_html({}) == ""
     p = ProfileReviews(username="x", start=date(2026, 9, 14), end=date(2026, 9, 14))
     assert "<b>" not in render_friends_html({"<b>": p})
+
+
+def test_year_window():
+    # Mon 2025-10-20 .. Sat 2026-10-17 (363 days), January label carries the year
+    p = ProfileReviews(
+        username="bob",
+        start=date(2025, 10, 20),
+        end=date(2026, 10, 17),
+        days=[FriendDay(study_date=date(2026, 10, 17), total_reviews=30)],
+    )
+    grid = build_grid(p)
+    assert len(grid) == 52
+    html = render_friends_html({"bob": p})
+    assert "Jan &#x27;26" in html or "Jan '26" in html
+    assert 'class="ah-scroll"' in html
+    assert compute_stats(p).learned_percent == 0
