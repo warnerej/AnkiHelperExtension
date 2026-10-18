@@ -44,7 +44,7 @@ The "Anki section" has not been specified in the repo. Ask the user, don't guess
 5. **Any external services** (e.g. an LLM provider) and where their keys live.
 
 ## Suggested approach
-
+/
 1. Get answers to the questions above.
 2. Write the SQL (tables and RLS policies) as a migration file. The user applies it in Supabase.
 3. Add `app/models/<feature>.py`, `app/services/<feature>.py` and `app/routers/<feature>.py`, then register the router in `app/main.py`.
