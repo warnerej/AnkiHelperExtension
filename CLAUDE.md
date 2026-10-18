@@ -11,7 +11,7 @@ Anki add-on (client) for AnkiHelper. It reads study stats from the local Anki co
 - Runtime deps (`httpx`, `pydantic`) are not installed by Anki, so they get vendored into `addon/vendor/` at package time (`uv pip install --target addon/vendor ...`). Keep pure-Python or match Anki's platform wheels.
 
 ## Layout (planned)
-- `addon/` is what gets zipped to `.ankiaddon`: `__init__.py` (hooks), `api_client.py`, `stats.py`, `sync.py`, `ui.py`, `config.json`, `vendor/`.
+- `addon/` is what gets zipped to `.ankiaddon`: `__init__.py` (hooks), `api_client.py`, `stats.py`, `ui.py`, `config.json`, `vendor/`.
 - `tests/`, `scripts/package.sh`.
 
 ## Auth flow the client implements
