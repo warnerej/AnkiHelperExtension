@@ -6,7 +6,7 @@
 
 An Anki add-on that turns private study stats into a shared, social progress view. It reads review history from the local Anki collection, pushes daily totals to the AnkiHelper backend (FastAPI + Supabase), and draws a GitHub-style year heatmap of your reviews, and your friends', on Anki's deck browser.
 
-> Backend: _link to the AnkiHelper backend repo here_ (separate repository). The add-on needs a running backend to sync.
+> Backend: https://github.com/warnerej/AnkiHelper (separate repository). The add-on needs a running backend to sync.
 
 ## Screenshots
 
@@ -14,8 +14,6 @@ An Anki add-on that turns private study stats into a shared, social progress vie
 | My stats | Friends |
 | --- | --- |
 | ![My heatmap](docs/images/heatmap-mine.png) | ![Friends heatmap](docs/images/heatmap-friends.png) |
-
-![Tools menu](docs/images/tools-menu.png)
 
 ## How it works
 
