@@ -5,6 +5,7 @@ import pytest
 
 from addon.api_client import ApiClient
 from addon.settings import Settings
+from addon.token_store import TokenStore
 
 
 def tokens(n: int, expires_in: int = 3600) -> dict:
@@ -49,19 +50,29 @@ def backend() -> FakeBackend:
 
 @pytest.fixture
 def settings() -> Settings:
-    return Settings("http://localhost:8000", "a@b.c", "pw-secret", 5)
+    return Settings("http://localhost:8000", 5)
 
 
 @pytest.fixture
-def make_client(backend, settings):
+def store(tmp_path) -> TokenStore:
+    return TokenStore(tmp_path / "user_files" / "session.json")
+
+
+@pytest.fixture
+def make_client(backend, settings, store):
+    """Client factory. Logs in first when a /auth/login response is scripted."""
     sleeps: list[float] = []
 
-    def factory() -> ApiClient:
-        return ApiClient(
+    def factory(*, login: bool = True) -> ApiClient:
+        client = ApiClient(
             lambda: settings,
+            store,
             transport=httpx.MockTransport(backend),
             sleep=sleeps.append,
         )
+        if login and ("POST", "/auth/login") in backend.handlers:
+            client.login("a@b.c", "pw-secret")
+        return client
 
     factory.sleeps = sleeps  # type: ignore[attr-defined]
     return factory

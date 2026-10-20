@@ -28,7 +28,7 @@ flowchart LR
 
 **Daily push.** `stats.today_stats` reads the `revlog` table through Anki's collection API and computes review count, true retention (share of review-type answers that were not "Again") and study minutes. The study day follows Anki's "next day starts at" rollover (`col.sched.day_cutoff`) rather than midnight, and is dated from noon to avoid DST errors. `PUT /reviews/daily` sends the running total for the day, so it is an idempotent upsert and safe to repeat. Pushes fire after answering cards (throttled to once per 5 minutes), after a sync, when the profile closes, or manually from the Tools menu.
 
-**Authentication.** Log in with the email and password from config and keep the tokens in memory only. Tokens are refreshed shortly before they expire. On a 401 the client refreshes once and retries once; if the refresh fails it logs in again. Refresh tokens rotate and are single use, so refreshes are single-flight: when several threads hit a 401 together, only one refresh is sent and the rest reuse its result.
+**Authentication.** Log in or sign up from Tools > AnkiHelper. The password is sent once and never stored; the access token stays in memory and only the refresh token is saved, atomically, to `user_files/session.json` (which survives add-on updates). On startup the session is restored from that token. Tokens are refreshed shortly before they expire. On a 401 the client refreshes once and retries once; if the refresh is rejected the file is cleared and the user is asked to log in again. Log out calls `POST /auth/logout` and deletes the file. Refresh tokens rotate and are single use, so refreshes are single-flight: when several threads hit a 401 together, only one refresh is sent and the rest reuse its result.
 
 **Friends and heatmaps.** Your own year is computed locally from `revlog`. Friends are fetched with `GET /profiles/{username}/reviews?days=365` for each name in the `friends` config list. They load lazily the first time the Friends tab is opened, refresh after 5 minutes, and while the server is down or waking up the add-on retries every 15 seconds. A failed background refresh keeps the previous data on screen. The heatmap is a Monday-first SVG grid with 10 colour levels scaled to each person's own data, plus daily average, days-learned %, longest and current streak, and a per-day tooltip.
 
@@ -37,13 +37,13 @@ flowchart LR
 - **UI never blocks.** All network calls run through `mw.taskman.run_in_background`; workers use a config snapshot and never touch `mw`.
 - **Resilient HTTP.** GET and PUT retry on network errors and 5xx with jittered exponential backoff; POST is never retried. Errors map to a typed hierarchy (`errors.py`: `AuthError`, `NetworkError`, `ServerError`, `ApiError`, …).
 - **Validated boundaries.** Responses are parsed into typed frozen dataclasses (`from_dict`, stdlib only); settings are validated up front (https required except for localhost, username format, de-duplicated friends).
-- **Secrets handled carefully.** Tokens live in memory only, the password is masked in `Settings.__repr__`, a logging filter redacts bearer tokens and credentials (and is tested), and packaging swaps in the example config so local credentials never ship. The add-on talks only to the AnkiHelper API, never to Supabase directly.
-- **Testable design.** Logic lives in pure modules (`stats`, `heatmap`, `friends_loader`, `friends_state`, `session`); only `ui.py` imports `aqt`, and `addon/__init__.py` skips UI setup when Anki is absent so tests run in plain Python.
+- **Secrets handled carefully.** The password is never written to disk (only a rotating refresh token, in a private file), a logging filter redacts bearer tokens and credentials (and is tested), and the config holds no secrets. The add-on talks only to the AnkiHelper API, never to Supabase directly.
+- **Testable design.** Logic lives in pure modules (`stats`, `heatmap`, `friends_loader`, `friends_state`, `session`, `token_store`); only `ui.py` imports `aqt`, and `addon/__init__.py` skips UI setup when Anki is absent so tests run in plain Python.
 - **Matches Anki's runtime.** Python is pinned to 3.13 to match Anki's bundled interpreter, and the one runtime dependency (`httpx`, pure Python) is vendored since Anki does not provide it.
 
 ## Setup
 
-1. Copy `addon/config.example.json` to `addon/config.json` (git-ignored, so credentials stay local).
+1. Copy `addon/config.example.json` to `addon/config.json` (git-ignored).
 2. Edit `addon/config.json` (options below).
 3. Install the vendored dependencies: `uv pip install --target addon/vendor --python 3.13 "httpx>=0.28.1"`. Everything vendored is pure Python, so it works on any OS.
 4. With Anki closed, link (or copy) `addon/` into Anki's add-ons folder as `ankihelper`. To find the folder, use Tools > Add-ons > View Files.
@@ -55,21 +55,21 @@ flowchart LR
    | Linux | `~/.local/share/Anki2/addons21/` | `ln -s "$PWD/addon" ~/.local/share/Anki2/addons21/ankihelper` (Flatpak: `~/.var/app/net.ankiweb.Anki/data/Anki2/addons21/`) |
 
    Alternatively run `scripts/package.sh` and install `dist/ankihelper.ankiaddon` through Tools > Add-ons > Install from file.
-5. In Anki, use Tools > AnkiHelper: Test connection. If you have no account yet, use Tools > AnkiHelper: Sign up.
+5. In Anki, use Tools > AnkiHelper > Sign up (or Log in), then Test connection.
 
 | Option | Description |
 | --- | --- |
 | `base_url` | Backend URL. `https` required, except for `localhost`. |
-| `email`, `password` | Account credentials. The password is stored in plain text in the config file, so keep it local. |
-| `username` | 3-20 chars of `a-z0-9_`; used only by Sign up. |
 | `friends` | Usernames whose last year of reviews is shown. There is no friends-list endpoint yet. |
 | `timeout_seconds` | HTTP timeout (default 15). |
 | `debug_logging` | Write a redacted rotating log to `addon/user_files/ankihelper.log`. |
 
 ### Tools menu
 
-- **Test connection**: logs in and calls `GET /auth/me`.
-- **Sign up**: prompts for a username and calls `POST /auth/signup`.
+- **Log in**: email and password dialog; keeps only the refresh token.
+- **Sign up**: email, username and password dialog; calls `POST /auth/signup`.
+- **Log out**: `POST /auth/logout`, then deletes the stored token.
+- **Test connection**: calls `GET /auth/me` with the current session.
 - **Push today's reviews**: `PUT /reviews/daily` (also runs automatically).
 - **Refresh friends**: re-fetches each friend's reviews; unknown usernames are skipped.
 
@@ -104,7 +104,8 @@ addon/
   __init__.py        entry point; adds vendor/ to sys.path, sets up UI inside Anki
   ui.py              menus, hooks, background tasks (only module importing aqt)
   api_client.py      HTTP client: retries, 401 handling, endpoint methods
-  session.py         in-memory tokens, login/refresh, response checking
+  session.py         tokens, login/refresh/logout, response checking
+  token_store.py     refresh token file in user_files/ (atomic writes)
   stats.py           revlog -> daily and yearly stats
   heatmap.py         HTML/SVG/CSS/JS heatmap rendering
   friends_loader.py  background friends fetch, load state and retry timer (Anki bits injected)

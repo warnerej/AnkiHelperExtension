@@ -9,11 +9,12 @@ from .errors import (
     ApiError,
     AuthError,
     NetworkError,
+    NotLoggedInError,
     ServerError,
 )
 from .log import get_logger
 from .models import SignupResponse, TokenResponse
-from .settings import Settings
+from .token_store import TokenStore
 
 REFRESH_MARGIN_SECONDS = 60
 
@@ -38,16 +39,23 @@ def check_response(resp: httpx.Response) -> httpx.Response:
 
 
 class Session:
-    """In-memory token holder. Thread-safe; at most one login/refresh at a time."""
+    """Token holder. Thread-safe; at most one login/refresh at a time.
+
+    The access token lives in memory only. The refresh token is also written to
+    `store` after every rotation so the session survives a restart. The password
+    is used for one login request and never kept.
+    """
 
     def __init__(
         self,
         http: httpx.Client,
-        get_settings: Callable[[], Settings],
+        store: TokenStore,
+        base_url: str,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._http = http
-        self._get_settings = get_settings
+        self._store_file = store
+        self._base_url = base_url
         self._clock = clock
         self._lock = threading.RLock()
         self._access: str | None = None
@@ -59,12 +67,12 @@ class Session:
         return self._access is not None
 
     def ensure_token(self) -> str:
-        """A valid access token, logging in or refreshing only when needed."""
+        """A valid access token, restoring or refreshing only when needed."""
         with self._lock:
             if self._access is None:
-                self._login()
+                self._restore()
             elif self._clock() >= self._expires_at - REFRESH_MARGIN_SECONDS:
-                self._refresh_or_login()
+                self._refresh_session()
             assert self._access is not None
             return self._access
 
@@ -73,9 +81,21 @@ class Session:
         with self._lock:
             if self._access is not None and self._access != failed_token:
                 return self._access
-            self._refresh_or_login()
+            self._refresh_session()
             assert self._access is not None
             return self._access
+
+    def login(self, email: str, password: str) -> None:
+        """Log in with credentials and persist the refresh token."""
+        with self._lock:
+            try:
+                resp = self._post(
+                    "/auth/login", json={"email": email, "password": password}
+                )
+            except AuthError as exc:
+                raise AuthError("Invalid email or password.") from exc
+            self._store(resp)
+            log.info("logged in")
 
     def signup(self, email: str, password: str, username: str) -> SignupResponse:
         """Create an account. Adopts the returned tokens when the server issues them."""
@@ -98,16 +118,22 @@ class Session:
         return result
 
     def logout(self) -> None:
-        """Best-effort server logout, then always clear local state."""
+        """Best-effort server logout, then always clear local state and the stored token."""
         with self._lock:
-            token = self._access
+            try:
+                token = self.ensure_token()
+            except AnkiHelperError as exc:
+                log.info("no session to end on the server: %s", exc)
+                token = None
+            if token is not None:
+                try:
+                    self._post(
+                        "/auth/logout", headers={"Authorization": f"Bearer {token}"}
+                    )
+                except AnkiHelperError as exc:
+                    log.info("logout request failed: %s", exc)
             self._clear()
-        if token is None:
-            return
-        try:
-            self._post("/auth/logout", headers={"Authorization": f"Bearer {token}"})
-        except AnkiHelperError as exc:
-            log.info("logout request failed: %s", exc)
+            self._store_file.clear()
 
     def _clear(self) -> None:
         self._access = None
@@ -123,6 +149,7 @@ class Session:
         self._access = tokens.access_token
         self._refresh = tokens.refresh_token
         self._expires_at = self._clock() + tokens.expires_in
+        self._store_file.save(tokens.refresh_token, self._base_url)
 
     def _store(self, resp: httpx.Response) -> None:
         try:
@@ -131,33 +158,35 @@ class Session:
             raise ServerError("Unexpected response from /auth") from exc
         self._set_tokens(tokens)
 
-    def _login(self) -> None:
-        settings = self._get_settings()
+    def _restore(self) -> None:
+        """Start from the stored refresh token (or fail as not logged in)."""
+        if self._refresh is None:
+            self._refresh = self._store_file.load(self._base_url)
+        if self._refresh is None:
+            raise NotLoggedInError()
+        self._refresh_session()
+
+    def _refresh_session(self) -> None:
+        refresh_token = self._refresh
+        if refresh_token is None:
+            refresh_token = self._store_file.load(self._base_url)
+        self._access = None
+        if refresh_token is None:
+            self._clear()
+            raise NotLoggedInError()
         try:
-            resp = self._post(
-                "/auth/login",
-                json={"email": settings.email, "password": settings.password},
+            self._store(
+                self._post("/auth/refresh", json={"refresh_token": refresh_token})
             )
         except AuthError as exc:
+            # Rejected or already-used refresh token: the user has to log in again.
+            log.info("refresh rejected (%s)", exc)
             self._clear()
-            raise AuthError("Invalid email or password.") from exc
-        self._store(resp)
-        log.info("logged in")
-
-    def _refresh_or_login(self) -> None:
-        refresh_token = self._refresh
-        self._clear()
-        if refresh_token is not None:
-            try:
-                self._store(
-                    self._post("/auth/refresh", json={"refresh_token": refresh_token})
-                )
-                log.info("token refreshed")
-                return
-            except (AuthError, ApiError) as exc:
-                # Rejected or already-used refresh token: fall back to a full login.
-                log.info("refresh rejected (%s); logging in again", exc)
-        self._login()
+            self._store_file.clear()
+            raise NotLoggedInError(
+                "Your AnkiHelper session expired. Use Tools > AnkiHelper > Log in."
+            ) from exc
+        log.info("token refreshed")
 
     def _post(self, path: str, **kwargs) -> httpx.Response:
         try:

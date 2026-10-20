@@ -6,12 +6,13 @@ from urllib.parse import quote
 
 import httpx
 
-from .errors import ApiError, AuthError, NetworkError, ServerError
+from .errors import ApiError, AuthError, NetworkError, NotConfiguredError, ServerError
 from .log import get_logger
 from .models import DailyReview, ProfileReviews, SignupResponse, UserResponse
 from .session import Session, check_response
 from .settings import Settings
 from .stats import TodayStats
+from .token_store import TokenStore
 
 CONNECT_TIMEOUT = 5.0
 GET_RETRIES = 2
@@ -27,10 +28,12 @@ class ApiClient:
     def __init__(
         self,
         get_settings: Callable[[], Settings],
+        token_store: TokenStore,
         transport: httpx.BaseTransport | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._get_settings = get_settings
+        self._token_store = token_store
         self._transport = transport
         self._sleep = sleep
         self._http: httpx.Client | None = None
@@ -58,7 +61,7 @@ class ApiClient:
                 ),
                 transport=self._transport,
             )
-            self._session = Session(self._http, self._get_settings)
+            self._session = Session(self._http, self._token_store, settings.base_url)
         return self._session
 
     def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
@@ -141,16 +144,29 @@ class ApiClient:
                 result[name] = None
         return result
 
+    def login(self, email: str, password: str) -> None:
+        """Log in and persist the refresh token (never retried; password not kept)."""
+        self._ensure_session().login(email, password)
+
+    def restore(self) -> None:
+        """Resume the stored session (raises NotLoggedInError if there is none)."""
+        self._ensure_session().ensure_token()
+
     def signup(self, email: str, password: str, username: str) -> SignupResponse:
         """Create an account (no bearer token, never retried)."""
         return self._ensure_session().signup(email, password, username)
 
     def logout(self) -> None:
-        if self._session is not None:
-            self._session.logout()
+        """End the server session (best effort) and delete the stored token."""
+        try:
+            session = self._ensure_session()
+        except NotConfiguredError:
+            self._token_store.clear()
+            return
+        session.logout()
 
     def close(self) -> None:
-        self.logout()
+        """Release the HTTP client. The stored session is kept for the next start."""
         if self._http is not None:
             self._http.close()
             self._http = None

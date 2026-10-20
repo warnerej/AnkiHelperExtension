@@ -13,29 +13,34 @@ _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 DEFAULT_TIMEOUT = 15.0
 
 
+LEGACY_KEYS = ("email", "password", "username")
+
+
+def strip_legacy_credentials(
+    config: dict[str, Any] | None,
+) -> tuple[dict[str, Any], bool]:
+    """Config without the keys that used to hold account details, and whether a
+    password was present (the cue for the one-time "please log in" message)."""
+    config = dict(config or {})
+    had_password = bool(config.get("password"))
+    for key in LEGACY_KEYS:
+        config.pop(key, None)
+    return config, had_password
+
+
 @dataclass(frozen=True)
 class Settings:
     base_url: str
-    email: str
-    password: str
     timeout_seconds: float = DEFAULT_TIMEOUT
-    username: str = ""
     friends: tuple[str, ...] = ()
-
-    def __repr__(self) -> str:  # keep the password out of tracebacks and logs
-        return (
-            f"Settings(base_url={self.base_url!r}, email={self.email!r}, password=***)"
-        )
 
     @classmethod
     def from_config(cls, config: dict[str, Any] | None) -> "Settings":
         config = config or {}
         base_url = str(config.get("base_url") or "").strip().rstrip("/")
-        email = str(config.get("email") or "").strip()
-        password = str(config.get("password") or "")
-        if not (base_url and email and password):
+        if not base_url:
             raise NotConfiguredError(
-                "AnkiHelper: set base_url, email and password in Tools > Add-ons > Config."
+                "AnkiHelper: set base_url in Tools > Add-ons > Config."
             )
         parsed = urlparse(base_url)
         if parsed.scheme not in ("http", "https") or not parsed.hostname:
@@ -48,11 +53,6 @@ class Settings:
             timeout = DEFAULT_TIMEOUT
         if timeout <= 0:
             timeout = DEFAULT_TIMEOUT
-        username = str(config.get("username") or "").strip().lower()
-        if username and not USERNAME_RE.fullmatch(username):
-            raise NotConfiguredError(
-                "AnkiHelper: username must be 3-20 letters, digits or _."
-            )
         raw_friends = config.get("friends")
         friends: list[str] = []
         if isinstance(raw_friends, list):
@@ -63,4 +63,4 @@ class Settings:
                         friends.append(name)
                 else:
                     log.info("ignoring invalid friend username %r", name)
-        return cls(base_url, email, password, timeout, username, tuple(friends))
+        return cls(base_url, timeout, tuple(friends))

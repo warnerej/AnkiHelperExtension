@@ -4,21 +4,87 @@ from pathlib import Path
 from typing import Any
 
 from aqt import gui_hooks, mw
-from aqt.qt import QAction
-from aqt.utils import getText, showWarning, tooltip
+from aqt.qt import (
+    QAction,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QLabel,
+    QLineEdit,
+    QMenu,
+    QVBoxLayout,
+)
+from aqt.utils import askUser, showInfo, showWarning, tooltip
 
 from .api_client import ApiClient
-from .errors import AnkiHelperError
+from .errors import AnkiHelperError, NotLoggedInError
 from .friends_loader import FriendsLoader
 from .heatmap import RETRY_CMD, VIEW_CMD, render_heatmap_html
 from .log import get_logger, setup_logging
 from .models import DailyReview, SignupResponse, UserResponse
-from .settings import Settings
+from .settings import USERNAME_RE, Settings, strip_legacy_credentials
 from .stats import TodayStats, today_stats, year_stats
+from .token_store import TokenStore
 
 log = get_logger()
 
 PUSH_THROTTLE_SECONDS = 300
+
+
+class CredentialsDialog(QDialog):
+    """Email + password, plus a username when signing up. Validates before accepting."""
+
+    def __init__(self, parent: Any, title: str, *, signup: bool) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self._signup = signup
+        self.email = QLineEdit()
+        self.username = QLineEdit()
+        self.password = QLineEdit()
+        self.password.setEchoMode(QLineEdit.EchoMode.Password)
+        form = QFormLayout()
+        form.addRow("Email", self.email)
+        if signup:
+            form.addRow("Username", self.username)
+        form.addRow("Password", self.password)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self._validate)
+        buttons.rejected.connect(self.reject)
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        if signup:
+            layout.addWidget(
+                _hint("Username: 3-20 letters, digits or _. Password: 8+ characters.")
+            )
+        layout.addWidget(buttons)
+
+    def _validate(self) -> None:
+        problem = None
+        if not self.email.text().strip() or not self.password.text():
+            problem = "Enter your email and password."
+        elif self._signup and not USERNAME_RE.fullmatch(
+            self.username.text().strip().lower()
+        ):
+            problem = "Username must be 3-20 letters, digits or _."
+        elif self._signup and len(self.password.text()) < 8:
+            problem = "Password must be at least 8 characters."
+        if problem:
+            showWarning(problem, title="AnkiHelper", parent=self)
+            return
+        self.accept()
+
+
+def _hint(text: str) -> QLabel:
+    label = QLabel(text)
+    label.setWordWrap(True)
+    return label
+
+
+def _unexpected(what: str) -> None:
+    log.exception("unexpected error during %s", what)
+    showWarning("Unexpected error. See user_files/ankihelper.log.", title="AnkiHelper")
 
 
 class Controller:
@@ -31,7 +97,8 @@ class Controller:
         assert mw is not None
         self._addon = mw.addonManager.addonFromModule(__name__)
         self._config: dict[str, Any] = {}
-        self.client = ApiClient(self._settings)
+        user_files = Path(__file__).parent / "user_files"
+        self.client = ApiClient(self._settings, TokenStore(user_files / "session.json"))
         self._last_pushed: TodayStats | None = None
         self._last_push_time = 0.0
         self.view = "mine"
@@ -48,6 +115,7 @@ class Controller:
             warn=lambda message: showWarning(message, title="AnkiHelper"),
         )
         self.reload_config()
+        self._migrate_legacy_config()
 
     def _settings(self) -> Settings:
         return Settings.from_config(self._config)
@@ -60,11 +128,39 @@ class Controller:
             bool(self._config.get("debug_logging")),
         )
 
-    def on_config_updated(self, _new_config: Any) -> None:
-        # Credentials or URL may have changed: drop the old session, then reload.
+    def _migrate_legacy_config(self) -> None:
+        """Older versions kept email/password in config.json: drop them silently."""
         assert mw is not None
-        mw.taskman.run_in_background(self.client.logout)
+        cleaned, had_password = strip_legacy_credentials(self._config)
+        if cleaned == self._config:
+            return
+        mw.addonManager.writeConfig(self._addon, cleaned)
+        self._config = cleaned
+        if had_password:
+            log.info("removed legacy email/password from config; log in via the menu")
+
+    def on_config_updated(self, _new_config: Any) -> None:
+        # A changed base_url rebuilds the client; the stored token is tied to its URL.
         self.reload_config()
+
+    def restore_session(self) -> None:
+        """At startup, resume the stored session; prompt for login if it was rejected."""
+        assert mw is not None
+        mw.taskman.run_in_background(self.client.restore, self._on_restore_result)
+
+    def _on_restore_result(self, future: Future[None]) -> None:
+        try:
+            future.result()
+        except NotLoggedInError as exc:
+            log.info("no session restored: %s", exc)
+            if "expired" in str(exc) and askUser(
+                f"{exc}\n\nLog in now?", title="AnkiHelper"
+            ):
+                self.log_in()
+        except AnkiHelperError as exc:
+            log.info("session restore failed: %s", exc)  # e.g. offline; retried on use
+        except Exception:
+            log.exception("unexpected error restoring session")
 
     def on_profile_close(self) -> None:
         assert mw is not None
@@ -194,29 +290,45 @@ class Controller:
         if mw.state == "deckBrowser":
             mw.deckBrowser.refresh()
 
+    def log_in(self) -> None:
+        assert mw is not None
+        self.reload_config()
+        dialog = CredentialsDialog(mw, "AnkiHelper: Log in", signup=False)
+        if not dialog.exec():
+            return
+        email, password = dialog.email.text().strip(), dialog.password.text()
+        tooltip("AnkiHelper: logging in...")
+        mw.taskman.run_in_background(
+            lambda: self.client.login(email, password), self._on_login_result
+        )
+
+    def _on_login_result(self, future: Future[None]) -> None:
+        try:
+            future.result()
+        except AnkiHelperError as exc:
+            log.info("login failed: %s", exc)
+            showWarning(str(exc), title="AnkiHelper")
+            return
+        except Exception:
+            _unexpected("login")
+            return
+        tooltip("AnkiHelper: logged in")
+        self.push_today()
+
     def sign_up(self) -> None:
         assert mw is not None
         self.reload_config()
-        try:
-            settings = self._settings()
-        except AnkiHelperError as exc:
-            showWarning(str(exc), title="AnkiHelper")
+        dialog = CredentialsDialog(mw, "AnkiHelper: Sign up", signup=True)
+        if not dialog.exec():
             return
-        username, ok = getText(
-            "Choose a username (3-20 letters, digits or _):",
-            parent=mw,
-            title="AnkiHelper: Sign up",
-            default=settings.username,
-        )
-        if not ok:
-            return
-        username = username.strip().lower()
+        email, password = dialog.email.text().strip(), dialog.password.text()
+        username = dialog.username.text().strip().lower()
         mw.taskman.run_in_background(
-            lambda: self.client.signup(settings.email, settings.password, username),
-            lambda future: self._on_signup_result(future, username),
+            lambda: self.client.signup(email, password, username),
+            self._on_signup_result,
         )
 
-    def _on_signup_result(self, future: Future[SignupResponse], username: str) -> None:
+    def _on_signup_result(self, future: Future[SignupResponse]) -> None:
         try:
             result = future.result()
         except AnkiHelperError as exc:
@@ -224,40 +336,50 @@ class Controller:
             showWarning(str(exc), title="AnkiHelper")
             return
         except Exception:
-            log.exception("unexpected error during signup")
-            showWarning(
-                "Unexpected error. See user_files/ankihelper.log.", title="AnkiHelper"
-            )
+            _unexpected("signup")
             return
         if result.confirmation_required:
-            msg = "Account created. Confirm your email, then use Test connection."
+            showInfo(
+                "Account created. Confirm your email, then use Tools > AnkiHelper > Log in.",
+                title="AnkiHelper",
+            )
         else:
-            msg = "Account created and logged in."
-        showWarning(
-            f'{msg}\nAdd "username": "{username}" to the add-on config.',
-            title="AnkiHelper",
+            tooltip("AnkiHelper: account created and logged in")
+            self.push_today()
+
+    def log_out(self) -> None:
+        assert mw is not None
+        mw.taskman.run_in_background(
+            self.client.logout, lambda _future: tooltip("AnkiHelper: logged out")
         )
 
 
 def setup() -> Controller:
     assert mw is not None
     controller = Controller()
-    action = QAction("AnkiHelper: Test connection", mw)
-    action.triggered.connect(controller.test_connection)
-    mw.form.menuTools.addAction(action)
-    push_action = QAction("AnkiHelper: Push today's reviews", mw)
-    push_action.triggered.connect(lambda: controller.push_today(manual=True))
-    mw.form.menuTools.addAction(push_action)
-    signup_action = QAction("AnkiHelper: Sign up", mw)
-    signup_action.triggered.connect(controller.sign_up)
-    mw.form.menuTools.addAction(signup_action)
-    friends_action = QAction("AnkiHelper: Refresh friends", mw)
-    friends_action.triggered.connect(controller.friends.refresh_manually)
-    mw.form.menuTools.addAction(friends_action)
+    menu = QMenu("AnkiHelper", mw)
+    for item in (
+        ("Log in...", controller.log_in),
+        ("Sign up...", controller.sign_up),
+        ("Log out", controller.log_out),
+        None,
+        ("Test connection", controller.test_connection),
+        ("Push today's reviews", lambda: controller.push_today(manual=True)),
+        ("Refresh friends", controller.friends.refresh_manually),
+    ):
+        if item is None:
+            menu.addSeparator()
+            continue
+        label, handler = item
+        action = QAction(label, mw)
+        action.triggered.connect(handler)
+        menu.addAction(action)
+    mw.form.menuTools.addMenu(menu)
     mw.addonManager.setConfigUpdatedAction(__name__, controller.on_config_updated)
     gui_hooks.profile_will_close.append(controller.on_profile_close)
     gui_hooks.sync_did_finish.append(controller.on_sync_finished)
     gui_hooks.webview_did_receive_js_message.append(controller.on_js_message)
     gui_hooks.deck_browser_will_render_content.append(controller.on_deck_browser_render)
     gui_hooks.reviewer_did_answer_card.append(controller.on_card_answered)
+    controller.restore_session()
     return controller

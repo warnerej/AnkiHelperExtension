@@ -3,11 +3,18 @@ class AnkiHelperError(Exception):
 
 
 class NotConfiguredError(AnkiHelperError):
-    """base_url, email or password is missing or invalid."""
+    """base_url is missing or invalid."""
 
 
 class AuthError(AnkiHelperError):
     """Credentials rejected, or the session could not be recovered."""
+
+
+class NotLoggedInError(AuthError):
+    """No usable session: never logged in, logged out, or the stored token was rejected."""
+
+    def __init__(self, message: str = "Not logged in. Use Tools > AnkiHelper > Log in.") -> None:
+        super().__init__(message)
 
 
 class NetworkError(AnkiHelperError):

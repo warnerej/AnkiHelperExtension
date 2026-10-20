@@ -23,9 +23,9 @@ A review row is `{study_date: "YYYY-MM-DD", total_reviews: int, retention: float
 
 ## Auth flow for the client
 
-1. On startup, call `POST /auth/login` with the email and password from the add-on config.
-2. Keep both tokens in memory only (not in the config file). Send `Authorization: Bearer <access_token>` on every call.
-3. On a 401, call `POST /auth/refresh` once and retry the original request once. Refresh tokens rotate and are single use, so always store the new refresh token, and do not refresh before every call. If the refresh fails, log in again.
+1. The user logs in through a dialog (`POST /auth/login`); the password is never stored. On startup the add-on restores the session with `POST /auth/refresh` using the saved refresh token.
+2. Keep the access token in memory only; persist only the refresh token (in `user_files/session.json`, not the config file). Send `Authorization: Bearer <access_token>` on every call.
+3. On a 401, call `POST /auth/refresh` once and retry the original request once. Refresh tokens rotate and are single use, so always store the new refresh token, and do not refresh before every call. If the refresh is rejected, delete the saved token and ask the user to log in again.
 4. Use HTTPS in deployment since the password is sent on login and signup.
 
 ## Designing review calls
