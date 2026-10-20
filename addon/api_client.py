@@ -101,7 +101,7 @@ class ApiClient:
         if stats.retention is not None:
             body["retention"] = stats.retention
         try:
-            return DailyReview.model_validate(
+            return DailyReview.from_dict(
                 self.put("/reviews/daily", json=body).json()
             )
         except ValueError as exc:
@@ -109,7 +109,7 @@ class ApiClient:
 
     def get_me(self) -> UserResponse:
         try:
-            return UserResponse.model_validate(self.get("/auth/me").json())
+            return UserResponse.from_dict(self.get("/auth/me").json())
         except ValueError as exc:
             raise ServerError("Unexpected response from /auth/me") from exc
 
@@ -119,7 +119,7 @@ class ApiClient:
         """A user's review rows for the past `days` days (404 raises ApiError)."""
         path = f"/profiles/{quote(username, safe='')}/reviews"
         try:
-            return ProfileReviews.model_validate(
+            return ProfileReviews.from_dict(
                 self.get(path, params={"days": days}).json()
             )
         except ValueError as exc:

@@ -8,7 +8,7 @@ Anki add-on (client) for AnkiHelper. It reads study stats from the local Anki co
 - `uv` project. Python is pinned to **3.13** because Anki bundles its own interpreter (not 3.14). Verify against the installed Anki (Help > About) before changing.
 - `uv sync`, `uv run pytest`, `uv run ruff check .`, `uv run pyright`.
 - Dev-only deps: `anki`, `aqt`, `pytest`, `ruff`, `pyright`. Anki provides these at runtime; never vendor them.
-- Runtime deps (`httpx`, `pydantic`) are not installed by Anki, so they get vendored into `addon/vendor/` at package time (`uv pip install --target addon/vendor ...`). Keep pure-Python or match Anki's platform wheels.
+- Runtime dep `httpx` (and its dependencies) is not installed by Anki, so it gets vendored into `addon/vendor/` at package time (`uv pip install --target addon/vendor ...`). Vendor pure-Python packages only (no compiled extensions) so one build works on every OS; response models are stdlib dataclasses for this reason.
 
 ## Layout
 - `addon/` is what gets zipped to `.ankiaddon`. Only `ui.py` imports `aqt`; everything else is plain Python so tests run without Anki.

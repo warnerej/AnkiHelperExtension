@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 
 rm -rf addon/vendor dist
 mkdir -p dist
-uv pip install --target addon/vendor --python 3.13 "httpx>=0.28.1" "pydantic>=2.14.1"
+uv pip install --target addon/vendor --python 3.13 "httpx>=0.28.1"
 
 # Stage a copy so the local (git-ignored) config.json with real credentials is never packaged.
 STAGE="$(mktemp -d)"

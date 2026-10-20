@@ -89,7 +89,7 @@ class Session:
                 raise ApiError(409, "That username or email is already taken.") from exc
             raise
         try:
-            result = SignupResponse.model_validate(resp.json())
+            result = SignupResponse.from_dict(resp.json())
         except ValueError as exc:
             raise ServerError("Unexpected response from /auth/signup") from exc
         if result.tokens is not None:
@@ -126,8 +126,8 @@ class Session:
 
     def _store(self, resp: httpx.Response) -> None:
         try:
-            tokens = TokenResponse.model_validate(resp.json())
-        except ValueError as exc:  # pydantic ValidationError and JSON errors
+            tokens = TokenResponse.from_dict(resp.json())
+        except ValueError as exc:  # bad shape and JSON errors
             raise ServerError("Unexpected response from /auth") from exc
         self._set_tokens(tokens)
 
