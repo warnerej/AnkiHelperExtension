@@ -21,7 +21,7 @@ Anki add-on (client) for AnkiHelper. It reads study stats from the local Anki co
 
 ## Auth flow the client implements
 1. `POST /auth/login` with email/password from add-on config -> `access_token`, `refresh_token`, `expires_in` (3600s).
-2. Keep tokens in memory only. Send `Authorization: Bearer <access_token>`.
+2. Keep tokens in memory only (the password itself is read from the add-on config, where it is stored in plain text). Send `Authorization: Bearer <access_token>`.
 3. On 401: `POST /auth/refresh`, retry once. If refresh fails, log in again.
 4. Refresh tokens rotate and are single use. Never refresh before every call.
 
@@ -29,7 +29,7 @@ Anki add-on (client) for AnkiHelper. It reads study stats from the local Anki co
 - Never embed or log passwords/tokens. Never use a Supabase service-role key. The add-on talks only to the AnkiHelper API, not Supabase directly.
 - Network calls run off the main thread (`mw.taskman.run_in_background`); never block the Qt UI.
 - Read the collection through Anki's APIs; never write to the collection DB directly.
-- Sync must be idempotent and incremental (e.g. cursor = last revlog id).
+- Sync must be idempotent: each push is an upsert of the day's running total, so re-sending is safe.
 - Tests use a fake HTTP transport (`httpx.MockTransport`) and temp `Collection` fixtures; no network.
 
 ## Decisions

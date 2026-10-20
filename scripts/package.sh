@@ -16,5 +16,5 @@ rm "$STAGE/config.example.json"
 
 # The add-on's files must sit at the zip root (not inside addon/).
 (cd "$STAGE" && zip -r "$OLDPWD/dist/ankihelper.ankiaddon" . \
-  -x "__pycache__/*" "*/__pycache__/*" "user_files/*" "*.pyc" ".DS_Store")
+  -x "__pycache__/*" "*/__pycache__/*" "user_files/*" "vendor/bin/*" "*.pyc" ".DS_Store")
 echo "Built dist/ankihelper.ankiaddon"

@@ -21,3 +21,16 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+extend-exclude = ["addon/vendor"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pyright]
+include = ["addon", "tests"]
+exclude = ["addon/vendor", "**/__pycache__"]
+pythonVersion = "3.13"

@@ -20,7 +20,7 @@ An Anki add-on that turns private study stats into a shared, social progress vie
 flowchart LR
     A[Anki collection<br/>revlog] -->|stats.py| B[Daily totals]
     B -->|ApiClient + Session| C[(AnkiHelper API<br/>FastAPI + Supabase)]
-    C -->|GET /profiles/…/reviews| D[friends_state.py]
+    C -->|GET /profiles/…/reviews| D[friends_loader.py]
     A -->|year_stats| E[heatmap.py]
     D --> E
     E -->|deck_browser_will_render_content| F[Deck browser]

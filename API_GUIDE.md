@@ -1,6 +1,6 @@
 # AnkiHelper API guide
 
-For an agent building the client (the Anki add-on) or extending the backend. `README.md` and `CLAUDE.md` in the repo root are authoritative if anything here disagrees. Interactive docs are at `/docs` when the server is running (`uv run uvicorn app.main:app --reload`).
+Reference for the AnkiHelper backend API that the Anki add-on talks to. The backend lives in a separate repo. `README.md` and `CLAUDE.md` in the repo root are authoritative if anything here disagrees. The backend serves interactive docs at `/docs`.
 
 ## Endpoints
 
@@ -57,13 +57,3 @@ Authorization: Bearer <access_token>
 | 404 | no review row for that date | treat as "no data" |
 | 422 | body or query failed validation (negative total, bad or missing date, short password) | fix the request, don't retry unchanged |
 | 502 | the database call failed | retry later with backoff |
-
-## Extending the backend
-
-Follow `CLAUDE.md`. In short:
-
-- Layers: `app/routers/` (HTTP), `app/services/` (logic, takes a Supabase `Client`), `app/models/` (pydantic). Register new routers in `app/main.py`.
-- Protect routes with `CurrentUser`. Query Supabase through `UserClient` (from `app/dependencies.py`) so RLS applies as that user. Only the anon key is used. Never add the service-role key.
-- New tables go in a numbered file in `supabase/migrations/` (the user applies it in Supabase). Give each table a `user_id uuid not null default auth.uid()`, enable RLS, and add per-operation policies for `user_id = (select auth.uid())`. `0001_daily_reviews.sql` is the template. It uses a `(user_id, study_date)` primary key and an `updated_at` trigger.
-- Tests override dependencies with fakes (`get_auth_service`, `get_review_service`), so they need no Supabase project. See `tests/test_reviews.py`. Run `uv run pytest`.
-- Update the endpoint tables in `README.md` and this file when adding endpoints.
