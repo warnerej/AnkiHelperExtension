@@ -10,7 +10,6 @@ An Anki add-on that turns private study stats into a shared, social progress vie
 
 ## Screenshots
 
-<!-- TODO: capture these and place them in docs/images/ -->
 | My stats | Friends |
 | --- | --- |
 | ![My heatmap](docs/images/heatmap-mine.png) | ![Friends heatmap](docs/images/heatmap-friends.png) |
@@ -39,7 +38,7 @@ flowchart LR
 - **Resilient HTTP.** GET and PUT retry on network errors and 5xx with jittered exponential backoff; POST is never retried. Errors map to a typed hierarchy (`errors.py`: `AuthError`, `NetworkError`, `ServerError`, `ApiError`, …).
 - **Validated boundaries.** Responses are parsed with pydantic models; settings are validated up front (https required except for localhost, username format, de-duplicated friends).
 - **Secrets handled carefully.** Tokens live in memory only, the password is masked in `Settings.__repr__`, a logging filter redacts bearer tokens and credentials (and is tested), and packaging swaps in the example config so local credentials never ship. The add-on talks only to the AnkiHelper API, never to Supabase directly.
-- **Testable design.** Logic lives in pure modules (`stats`, `heatmap`, `friends_state`, `session`); only `ui.py` imports `aqt`, and `addon/__init__.py` skips UI setup when Anki is absent so tests run in plain Python.
+- **Testable design.** Logic lives in pure modules (`stats`, `heatmap`, `friends_loader`, `friends_state`, `session`); only `ui.py` imports `aqt`, and `addon/__init__.py` skips UI setup when Anki is absent so tests run in plain Python.
 - **Matches Anki's runtime.** Python is pinned to 3.13 to match Anki's bundled interpreter, and runtime dependencies (`httpx`, `pydantic`) are vendored since Anki does not provide them.
 
 ## Setup
@@ -80,13 +79,13 @@ flowchart LR
 
 ```sh
 uv sync
-uv run pytest        # 62 tests
+uv run pytest        # 71 tests
 uv run ruff check .
 uv run pyright
 scripts/package.sh   # builds dist/ankihelper.ankiaddon
 ```
 
-Tests use a scriptable `httpx.MockTransport` backend (no network) and a real temporary Anki `Collection` for the stats queries. They cover login/refresh/retry behaviour including concurrent 401s, request retry rules, the stats calculations, heatmap rendering, the friends-loading state machine and log redaction. `ui.py` is not unit-tested because it needs a running Qt/Anki.
+Tests use a scriptable `httpx.MockTransport` backend (no network) and a real temporary Anki `Collection` for the stats queries. They cover login/refresh/retry behaviour including concurrent 401s, request retry rules, the stats calculations, heatmap rendering, the friends-loading state machine (`FriendsLoader` with fake scheduling) and log redaction. `ui.py` is not unit-tested because it needs a running Qt/Anki.
 
 Packaging note: `pydantic_core` is a compiled wheel, so `.ankiaddon` builds are specific to the platform they were packaged on (currently macOS).
 
@@ -100,7 +99,8 @@ addon/
   session.py         in-memory tokens, login/refresh, response checking
   stats.py           revlog -> daily and yearly stats
   heatmap.py         HTML/SVG/CSS/JS heatmap rendering
-  friends_state.py   lazy-load / retry state machine for friends
+  friends_loader.py  background friends fetch, load state and retry timer (Anki bits injected)
+  friends_state.py   pure load/retry decisions used by the loader
   models.py          pydantic response models
   settings.py        validated config
   errors.py          exception hierarchy

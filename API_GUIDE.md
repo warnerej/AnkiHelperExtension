@@ -67,7 +67,3 @@ Follow `CLAUDE.md`. In short:
 - New tables go in a numbered file in `supabase/migrations/` (the user applies it in Supabase). Give each table a `user_id uuid not null default auth.uid()`, enable RLS, and add per-operation policies for `user_id = (select auth.uid())`. `0001_daily_reviews.sql` is the template. It uses a `(user_id, study_date)` primary key and an `updated_at` trigger.
 - Tests override dependencies with fakes (`get_auth_service`, `get_review_service`), so they need no Supabase project. See `tests/test_reviews.py`. Run `uv run pytest`.
 - Update the endpoint tables in `README.md` and this file when adding endpoints.
-
-## Note on the older handoff doc
-
-`docs/ANKI_HANDOFF.md` was written before the reviews endpoints existed and says only auth is built. Treat it as background on conventions and open questions. This file and the README describe the current state.

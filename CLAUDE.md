@@ -1,8 +1,8 @@
 # AnkiHelperExtension
 
-Anki add-on (client) for AnkiHelper. It reads study stats from the local Anki collection, pushes them to the AnkiHelper FastAPI backend (Supabase-backed), and pulls stats back to display progress for the user and others. Backend context: `ANKI_HANDOFF.md`.
+Anki add-on (client) for AnkiHelper. It reads study stats from the local Anki collection, pushes them to the AnkiHelper FastAPI backend (Supabase-backed), and pulls stats back to display progress for the user and others. Endpoint reference: `API_GUIDE.md`; overview and setup: `README.md`.
 
-**Status:** backend has auth (`/auth/signup|login|refresh|me|logout`), daily reviews (`PUT/GET /reviews/daily`, `GET /reviews/daily/{date}`) and friends (`GET /profiles/{username}/reviews`, past year via `days=365`, 404 if unknown). The add-on implements login/refresh, signup, daily push and the friends fetch (usernames come from the `friends` config list; no friends-list endpoint exists). Endpoint details: `API_GUIDE.md`.
+**Status:** backend has auth (`/auth/signup|login|refresh|me|logout`), daily reviews (`PUT/GET /reviews/daily`, `GET /reviews/daily/{date}`) and friends (`GET /profiles/{username}/reviews`, past year via `days=365`, 404 if unknown). The add-on implements login/refresh, signup, daily push and the friends fetch (usernames come from the `friends` config list; no friends-list endpoint exists).
 
 ## Environment
 - `uv` project. Python is pinned to **3.13** because Anki bundles its own interpreter (not 3.14). Verify against the installed Anki (Help > About) before changing.
@@ -10,8 +10,13 @@ Anki add-on (client) for AnkiHelper. It reads study stats from the local Anki co
 - Dev-only deps: `anki`, `aqt`, `pytest`, `ruff`, `pyright`. Anki provides these at runtime; never vendor them.
 - Runtime deps (`httpx`, `pydantic`) are not installed by Anki, so they get vendored into `addon/vendor/` at package time (`uv pip install --target addon/vendor ...`). Keep pure-Python or match Anki's platform wheels.
 
-## Layout (planned)
-- `addon/` is what gets zipped to `.ankiaddon`: `__init__.py` (hooks), `api_client.py`, `stats.py`, `ui.py`, `config.json`, `vendor/`.
+## Layout
+- `addon/` is what gets zipped to `.ankiaddon`. Only `ui.py` imports `aqt`; everything else is plain Python so tests run without Anki.
+  - `__init__.py` (entry; sets up `vendor/` path, calls `ui.setup()` inside Anki), `ui.py` (`Controller`: menus, hooks, daily push, signup)
+  - `friends_loader.py` + `friends_state.py` (friends fetch/retry state machine, with Anki bits injected; pure decisions)
+  - `api_client.py` (endpoints, retries), `session.py` (tokens, login/refresh), `settings.py`, `models.py`, `errors.py`, `log.py`
+  - `stats.py` (revlog -> stats), `heatmap.py` (HTML/SVG rendering)
+  - `config.example.json`, `config.md`, `manifest.json`, `vendor/` (git-ignored, built by packaging)
 - `tests/`, `scripts/package.sh`.
 
 ## Auth flow the client implements
@@ -27,5 +32,7 @@ Anki add-on (client) for AnkiHelper. It reads study stats from the local Anki co
 - Sync must be idempotent and incremental (e.g. cursor = last revlog id).
 - Tests use a fake HTTP transport (`httpx.MockTransport`) and temp `Collection` fixtures; no network.
 
-## Unresolved (settle with the user before coding)
-What is sent/received, table schema and RLS, sync/conflict semantics, id mapping (Anki ids -> server ids), and any external services.
+## Decisions
+- Sent: one running-total row per Anki day (`PUT /reviews/daily`, upsert keyed on user + `study_date`; the client owns the date). Received: friends' past year, by username from config.
+- Ids: no Anki ids are sent; the server key is `(user, study_date)`. Nothing is deleted server-side.
+- Not built: a friends-list endpoint, card/note sync, external services.

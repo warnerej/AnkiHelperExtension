@@ -1,5 +1,4 @@
 import time
-from collections.abc import Callable
 from concurrent.futures import Future
 from pathlib import Path
 from typing import Any
@@ -8,12 +7,12 @@ from aqt import gui_hooks, mw
 from aqt.qt import QAction
 from aqt.utils import getText, showWarning, tooltip
 
-from . import friends_state as fs
 from .api_client import ApiClient
 from .errors import AnkiHelperError
+from .friends_loader import FriendsLoader
 from .heatmap import RETRY_CMD, VIEW_CMD, render_heatmap_html
 from .log import get_logger, setup_logging
-from .models import DailyReview, ProfileReviews, SignupResponse, UserResponse
+from .models import DailyReview, SignupResponse, UserResponse
 from .settings import Settings
 from .stats import TodayStats, today_stats, year_stats
 
@@ -35,12 +34,19 @@ class Controller:
         self.client = ApiClient(self._settings)
         self._last_pushed: TodayStats | None = None
         self._last_push_time = 0.0
-        self.friends_reviews: dict[str, ProfileReviews | None] = {}
-        self._last_friends_fetch = 0.0
-        self.friends_status = fs.IDLE
-        self.friends_attempts = 0
-        self._friends_inflight = False
         self.view = "mine"
+        self.friends = FriendsLoader(
+            fetch=self.client.get_friends_reviews,
+            run_in_background=lambda task, done: mw.taskman.run_in_background(
+                task, done
+            ),
+            single_shot=lambda ms, fn: mw.progress.single_shot(ms, fn, False),
+            reload_config=self.reload_config,
+            on_change=self._refresh_deck_browser,
+            is_active=lambda: self.view == "friends",
+            notify=tooltip,
+            warn=lambda message: showWarning(message, title="AnkiHelper"),
+        )
         self.reload_config()
 
     def _settings(self) -> Settings:
@@ -159,109 +165,19 @@ class Controller:
             return
         tooltip(f"AnkiHelper: connected as {me.email or 'unknown user'}")
 
-    def ensure_friends(self) -> None:
-        """Load friends if this session has none yet (or they are stale)."""
-        if self._friends_inflight:
-            return
-        age = time.monotonic() - self._last_friends_fetch
-        action = fs.action_on_open(self.friends_status, age)
-        if action is None:
-            return
-        if action == "fetch":
-            self.friends_status = fs.LOADING
-            self.friends_attempts = 0
-        self.fetch_friends(on_loaded=self._refresh_deck_browser)
-
-    def fetch_friends(
-        self, *, manual: bool = False, on_loaded: Callable[[], None] | None = None
-    ) -> None:
-        """Load friends' last year into `self.friends_reviews` (main thread)."""
-        assert mw is not None
-        if self._friends_inflight:
-            return
-        self._friends_inflight = True
-        if self.friends_status != fs.LOADED:
-            self.friends_status = fs.LOADING
-        self.reload_config()
-        self._last_friends_fetch = time.monotonic()
-        mw.taskman.run_in_background(
-            self.client.get_friends_reviews,
-            lambda future: self._on_friends_result(future, manual, on_loaded),
-        )
-
-    def _on_friends_result(
-        self,
-        future: Future[dict[str, ProfileReviews | None]],
-        manual: bool,
-        on_loaded: Callable[[], None] | None = None,
-    ) -> None:
-        assert mw is not None
-        self._friends_inflight = False
-        try:
-            result = future.result()
-        except AnkiHelperError as exc:
-            log.info("friends fetch failed: %s", exc)
-            self._on_friends_failed(exc, str(exc), manual)
-            return
-        except Exception:
-            log.exception("unexpected error fetching friends")
-            self._on_friends_failed(
-                None, "Unexpected error. See user_files/ankihelper.log.", manual
-            )
-            return
-        self.friends_reviews = result
-        self.friends_status = fs.LOADED
-        found = sum(1 for v in result.values() if v is not None)
-        log.info("loaded reviews for %d/%d friends", found, len(result))
-        if manual:
-            tooltip(f"AnkiHelper: loaded {found} of {len(result)} friends")
-        if on_loaded is not None:
-            on_loaded()
-
-    def _on_friends_failed(
-        self, exc: Exception | None, message: str, manual: bool
-    ) -> None:
-        assert mw is not None
-        if manual:
-            showWarning(message, title="AnkiHelper")
-        if self.friends_status == fs.LOADED:
-            return  # a background refresh failed; keep showing the old data
-        self.friends_attempts += 1
-        if fs.should_retry(exc) and not manual:
-            # Server down or still waking up: keep trying while Friends is open.
-            mw.progress.single_shot(fs.RETRY_SECONDS * 1000, self._retry_friends, False)
-        else:
-            self.friends_status = fs.ERROR
-        self._refresh_deck_browser()
-
-    def _retry_friends(self) -> None:
-        if self.view == "friends" and self.friends_status == fs.LOADING:
-            self.fetch_friends(on_loaded=self._refresh_deck_browser)
-
-    def refresh_friends_manually(self) -> None:
-        if self._friends_inflight:
-            return
-        self.friends_status = fs.LOADING
-        self.friends_attempts = 0
-        self.fetch_friends(manual=True, on_loaded=self._refresh_deck_browser)
-        self._refresh_deck_browser()
-
     def on_deck_browser_render(self, _deck_browser: Any, content: Any) -> None:
         """Append the heatmap to the main screen."""
         assert mw is not None
         mine = year_stats(mw.col) if mw.col is not None else None
         content.stats += render_heatmap_html(
-            mine, self.friends_reviews, self.view, self.friends_status
+            mine, self.friends.reviews, self.view, self.friends.status
         )
 
     def on_js_message(
         self, handled: tuple[bool, Any], message: str, _context: Any
     ) -> tuple[bool, Any]:
         if message == RETRY_CMD:
-            if self.friends_status == fs.ERROR:
-                self.friends_status = fs.IDLE
-                self.ensure_friends()
-                self._refresh_deck_browser()
+            self.friends.retry_after_error()
             return (True, None)
         if not message.startswith(VIEW_CMD):
             return handled
@@ -269,7 +185,7 @@ class Controller:
         if view in ("mine", "friends"):
             self.view = view
             if view == "friends":
-                self.ensure_friends()
+                self.friends.ensure()
             self._refresh_deck_browser()
         return (True, None)
 
@@ -336,7 +252,7 @@ def setup() -> Controller:
     signup_action.triggered.connect(controller.sign_up)
     mw.form.menuTools.addAction(signup_action)
     friends_action = QAction("AnkiHelper: Refresh friends", mw)
-    friends_action.triggered.connect(controller.refresh_friends_manually)
+    friends_action.triggered.connect(controller.friends.refresh_manually)
     mw.form.menuTools.addAction(friends_action)
     mw.addonManager.setConfigUpdatedAction(__name__, controller.on_config_updated)
     gui_hooks.profile_will_close.append(controller.on_profile_close)
