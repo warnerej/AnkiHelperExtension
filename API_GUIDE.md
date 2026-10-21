@@ -17,7 +17,19 @@ All bodies and responses are JSON. Every endpoint except `/health`, `/auth/signu
 | `PUT /reviews/daily` | yes | `{total_reviews, study_date, retention?, study_minutes?}` | the saved row (below) |
 | `GET /reviews/daily` | yes | query: `start`, `end` (ISO dates, optional), `limit` (1-365, default 90) | list of rows, newest first |
 | `GET /reviews/daily/{study_date}` | yes | | one row, or 404 |
-| `GET /profiles/{username}/reviews` | yes | | `{username, start, end, days}` with that user's rows for the past `days` days (query param, 1-365, default 30; the add-on sends 365; newest first, same fields as a row minus `updated_at`); 404 if no such username |
+| `GET /profiles/{username}/reviews` (deprecated; the add-on no longer calls it) | yes | | `{username, start, end, days}` with that user's rows for the past `days` days (query param, 1-365, default 30; the add-on sends 365; newest first, same fields as a row minus `updated_at`); 404 if no such username |
+| `POST /groups` | yes | `{name}` | 201 group incl. `invite_code` (409 at 20 owned groups) |
+| `GET /groups` | yes | | `[{id, name, role, member_count}]` |
+| `GET /groups/{id}` | yes | | `{id, name, owner, members: [{username, role, joined_at}]}`; the owner also gets `invite_code` and `allowed`; 404 for non-members |
+| `PATCH /groups/{id}` | owner | `{name}` | group |
+| `DELETE /groups/{id}` | owner | | 204 |
+| `POST /groups/join` | yes | `{invite_code}` | group; 404 for a bad code or a username not on the allowed list (indistinguishable); 429 after 10 failed attempts per hour |
+| `POST /groups/{id}/leave` | member | | 204; 409 for the owner |
+| `POST /groups/{id}/allowed` | owner | `{username}` | allowed (max 50 -> 409) |
+| `DELETE /groups/{id}/allowed/{username}` | owner | | 204; also removes that member; 409 for the owner's own name |
+| `POST /groups/{id}/invite-code` | owner | | `{invite_code}`; the old code stops working |
+| `POST /groups/{id}/transfer` | owner | `{username}` | target must have joined, else 409 |
+| `GET /groups/{id}/reviews` | member | query: `days` (1-365; the add-on sends 365) | `{group_id, start, end, members: [{username, days}]}`; every joined member is listed, `days` may be empty |
 
 A review row is `{study_date: "YYYY-MM-DD", total_reviews: int, retention: float | null, study_minutes: float | null, updated_at: ISO datetime}`. `retention` is a percent (0-100) and `study_minutes` is the minutes studied that day (0-1440). Both are optional on PUT; if omitted, any stored value is kept (null if never sent). Send them as running values for the day, like `total_reviews`.
 

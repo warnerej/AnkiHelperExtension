@@ -37,6 +37,8 @@ class FakeBackend:
         if isinstance(item, Exception):
             raise item
         status, body = item
+        if body is None:
+            return httpx.Response(status)
         return httpx.Response(status, json=body)
 
     def body(self, index: int) -> dict:

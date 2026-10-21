@@ -1,6 +1,6 @@
 {
     "base_url": "https://api.example.com",
-    "friends": ["friend_one", "friend_two"],
+    "selected_group": "",
     "timeout_seconds": 15,
     "debug_logging": false
 }

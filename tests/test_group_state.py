@@ -1,5 +1,5 @@
 from addon.errors import ApiError, AuthError, NetworkError, ServerError
-from addon.friends_state import (
+from addon.group_state import (
     ERROR,
     IDLE,
     LOADED,

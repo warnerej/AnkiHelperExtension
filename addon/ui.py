@@ -18,11 +18,12 @@ from aqt.utils import askUser, showInfo, showWarning, tooltip
 
 from .api_client import ApiClient
 from .errors import AnkiHelperError, NotLoggedInError
-from .friends_loader import FriendsLoader
-from .heatmap import RETRY_CMD, VIEW_CMD, render_heatmap_html
+from .group_loader import GroupLoader, load_snapshot
+from .groups_dialog import GroupsDialog
+from .heatmap import GROUP_CMD, GROUPS_CMD, RETRY_CMD, VIEW_CMD, render_heatmap_html
 from .log import get_logger, setup_logging
 from .models import DailyReview, SignupResponse, UserResponse
-from .settings import USERNAME_RE, Settings, strip_legacy_credentials
+from .settings import USERNAME_RE, Settings, strip_friends, strip_legacy_credentials
 from .stats import TodayStats, today_stats, year_stats
 from .token_store import TokenStore
 
@@ -102,15 +103,20 @@ class Controller:
         self._last_pushed: TodayStats | None = None
         self._last_push_time = 0.0
         self.view = "mine"
-        self.friends = FriendsLoader(
-            fetch=self.client.get_friends_reviews,
+        self._groups_dialog: GroupsDialog | None = None
+        self.groups = GroupLoader(
+            fetch=lambda wanted: load_snapshot(
+                self.client.list_groups, self.client.get_group_reviews, wanted
+            ),
             run_in_background=lambda task, done: mw.taskman.run_in_background(
                 task, done
             ),
             single_shot=lambda ms, fn: mw.progress.single_shot(ms, fn, False),
             reload_config=self.reload_config,
+            get_selected=lambda: str(self._config.get("selected_group") or "") or None,
+            save_selected=self._save_selected_group,
             on_change=self._refresh_deck_browser,
-            is_active=lambda: self.view == "friends",
+            is_active=lambda: self.view == "groups",
             notify=tooltip,
             warn=lambda message: showWarning(message, title="AnkiHelper"),
         )
@@ -128,16 +134,33 @@ class Controller:
             bool(self._config.get("debug_logging")),
         )
 
+    def _save_selected_group(self, group_id: str) -> None:
+        assert mw is not None
+        self._config = {**self._config, "selected_group": group_id}
+        mw.addonManager.writeConfig(self._addon, self._config)
+
     def _migrate_legacy_config(self) -> None:
-        """Older versions kept email/password in config.json: drop them silently."""
+        """Drop retired config keys: email/password silently, `friends` with a note."""
         assert mw is not None
         cleaned, had_password = strip_legacy_credentials(self._config)
+        cleaned, had_friends = strip_friends(cleaned)
         if cleaned == self._config:
             return
         mw.addonManager.writeConfig(self._addon, cleaned)
         self._config = cleaned
         if had_password:
             log.info("removed legacy email/password from config; log in via the menu")
+        if had_friends:
+            log.info("removed retired friends list from config")
+            mw.progress.single_shot(3000, self._show_friends_removed_note, False)
+
+    def _show_friends_removed_note(self) -> None:
+        showInfo(
+            "AnkiHelper: the `friends` setting is no longer used and has been "
+            "removed. Sharing now works through groups: create or join one from "
+            "Tools > AnkiHelper > Groups.",
+            title="AnkiHelper",
+        )
 
     def on_config_updated(self, _new_config: Any) -> None:
         # A changed base_url rebuilds the client; the stored token is tied to its URL.
@@ -162,8 +185,34 @@ class Controller:
         except Exception:
             log.exception("unexpected error restoring session")
 
+    def open_groups(self) -> None:
+        """Show the (single, non-modal) Groups dialog."""
+        assert mw is not None
+        if self._groups_dialog is None:
+            dialog = GroupsDialog(
+                mw,
+                self.client,
+                lambda task, done: mw.taskman.run_in_background(task, done),
+            )
+            dialog.finished.connect(lambda _result: self._on_groups_closed())
+            self._groups_dialog = dialog
+            dialog.show()
+            dialog.reload()
+        else:
+            self._groups_dialog.show()
+            self._groups_dialog.raise_()
+            self._groups_dialog.activateWindow()
+
+    def _on_groups_closed(self) -> None:
+        self._groups_dialog = None
+        self.groups.mark_stale()  # the user may have created, joined or left groups
+        if self.view == "groups":
+            self.groups.ensure()
+
     def on_profile_close(self) -> None:
         assert mw is not None
+        if self._groups_dialog is not None:
+            self._groups_dialog.close()
         # Push the final total, then close, in one worker so they cannot race.
         reading = self._read_today()
 
@@ -266,22 +315,33 @@ class Controller:
         assert mw is not None
         mine = year_stats(mw.col) if mw.col is not None else None
         content.stats += render_heatmap_html(
-            mine, self.friends.reviews, self.view, self.friends.status
+            mine,
+            self.groups.groups,
+            self.groups.selected,
+            self.groups.reviews,
+            self.view,
+            self.groups.status,
         )
 
     def on_js_message(
         self, handled: tuple[bool, Any], message: str, _context: Any
     ) -> tuple[bool, Any]:
         if message == RETRY_CMD:
-            self.friends.retry_after_error()
+            self.groups.retry_after_error()
+            return (True, None)
+        if message == GROUPS_CMD:
+            self.open_groups()
+            return (True, None)
+        if message.startswith(GROUP_CMD):
+            self.groups.select(message.removeprefix(GROUP_CMD))
             return (True, None)
         if not message.startswith(VIEW_CMD):
             return handled
         view = message.removeprefix(VIEW_CMD)
-        if view in ("mine", "friends"):
+        if view in ("mine", "groups"):
             self.view = view
-            if view == "friends":
-                self.friends.ensure()
+            if view == "groups":
+                self.groups.ensure()
             self._refresh_deck_browser()
         return (True, None)
 
@@ -362,10 +422,11 @@ def setup() -> Controller:
         ("Log in...", controller.log_in),
         ("Sign up...", controller.sign_up),
         ("Log out", controller.log_out),
+        ("Groups...", controller.open_groups),
         None,
         ("Test connection", controller.test_connection),
         ("Push today's reviews", lambda: controller.push_today(manual=True)),
-        ("Refresh friends", controller.friends.refresh_manually),
+        ("Refresh groups", controller.groups.refresh_manually),
     ):
         if item is None:
             menu.addSeparator()

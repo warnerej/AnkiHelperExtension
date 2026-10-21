@@ -1,7 +1,7 @@
 **AnkiHelper settings**
 
 - `base_url`: AnkiHelper API address, e.g. `https://api.example.com` (https required, except localhost).
-- `friends`: list of usernames whose last year of reviews to fetch (unknown names are skipped).
+- `selected_group`: id of the group shown on the Groups tab. Set automatically when you pick a group; leave it empty.
 - `timeout_seconds`: how long to wait for the server before giving up (default 15).
 - `debug_logging`: write extra detail to `user_files/ankihelper.log` (secrets are always redacted).
 

@@ -3,12 +3,11 @@ from datetime import date, datetime
 
 import pytest
 
-from addon.models import DailyReview, FriendDay, ProfileReviews, SignupResponse, TokenResponse, UserResponse
+from addon.models import DailyReview, ReviewDay, SignupResponse, TokenResponse, UserResponse
 
 TOKENS = {"access_token": "a", "refresh_token": "r", "expires_in": 60}
 DAY = {"study_date": "2026-01-02", "total_reviews": 5, "retention": 0.9, "study_minutes": 12}
 DAILY = {**DAY, "updated_at": "2026-01-02T10:00:00+00:00"}
-PROFILE = {"username": "bob", "start": "2025-01-01", "end": "2026-01-01", "days": [DAY]}
 
 
 class TestTokenResponse:
@@ -114,53 +113,46 @@ class TestSignupResponse:
             SignupResponse.from_dict({"user": {}, **patch})
 
 
-class TestFriendDay:
+class TestReviewDay:
     def test_valid(self):
-        d = FriendDay.from_dict({**DAY, "extra": 1})
-        assert d == FriendDay(date(2026, 1, 2), 5, 0.9, 12.0)
+        d = ReviewDay.from_dict({**DAY, "extra": 1})
+        assert d == ReviewDay(date(2026, 1, 2), 5, 0.9, 12.0)
 
     def test_optionals_default(self):
-        d = FriendDay.from_dict({"study_date": "2026-01-02", "total_reviews": 1})
+        d = ReviewDay.from_dict({"study_date": "2026-01-02", "total_reviews": 1})
         assert d.retention is None and d.study_minutes is None
 
     @pytest.mark.parametrize("key", ["study_date", "total_reviews"])
     def test_missing(self, key):
         with pytest.raises(ValueError, match=key):
-            FriendDay.from_dict({k: v for k, v in DAY.items() if k != key})
+            ReviewDay.from_dict({k: v for k, v in DAY.items() if k != key})
 
     @pytest.mark.parametrize("patch", [{"study_date": "2026-13-45"}, {"total_reviews": 2.5}, {"retention": []}])
     def test_bad_types(self, patch):
         with pytest.raises(ValueError):
-            FriendDay.from_dict({**DAY, **patch})
+            ReviewDay.from_dict({**DAY, **patch})
 
 
-class TestProfileReviews:
-    def test_valid(self):
-        p = ProfileReviews.from_dict({**PROFILE, "extra": 1})
-        assert (p.username, p.start, p.end) == ("bob", date(2025, 1, 1), date(2026, 1, 1))
-        assert p.days == [FriendDay(date(2026, 1, 2), 5, 0.9, 12.0)]
+def test_group_models_defaults_and_errors():
+    from addon.models import Group, GroupReviews
 
-    def test_days_default_is_not_shared(self):
-        base = {"username": "bob", "start": "2025-01-01", "end": "2026-01-01"}
-        a, b = ProfileReviews.from_dict(base), ProfileReviews.from_dict(base)
-        assert a.days == [] and a.days is not b.days
+    g = Group.from_dict({"id": "g", "name": "n"})
+    assert g.members == [] and g.invite_code is None and g.allowed is None
+    with pytest.raises(ValueError, match="Group.name"):
+        Group.from_dict({"id": "g"})
+    with pytest.raises(ValueError):
+        GroupReviews.from_dict({"group_id": "g", "start": "2026-01-01", "end": "bad"})
 
-    @pytest.mark.parametrize("key", ["username", "start", "end"])
-    def test_missing(self, key):
-        with pytest.raises(ValueError, match=key):
-            ProfileReviews.from_dict({k: v for k, v in PROFILE.items() if k != key})
 
-    @pytest.mark.parametrize(
-        "patch",
-        [
-            {"username": 5},
-            {"start": "soon"},
-            {"days": "none"},
-            {"days": {"a": 1}},
-            {"days": ["2026-01-02"]},
-            {"days": [{"study_date": "2026-01-02"}]},
-        ],
-    )
-    def test_bad_types(self, patch):
-        with pytest.raises(ValueError):
-            ProfileReviews.from_dict({**PROFILE, **patch})
+def test_group_reviews_year_for_and_total():
+    from addon.models import GroupReviews, MemberReviews, YearReviews
+
+    d1, d2 = date(2026, 1, 1), date(2026, 1, 2)
+    a = MemberReviews("a", [ReviewDay(d1, 5, 90.0, 10.0), ReviewDay(d2, 1)])
+    b = MemberReviews("b", [ReviewDay(d1, 7, None, 4.0)])
+    g = GroupReviews("g", d1, d2, [a, b])
+    assert g.year_for(a) == YearReviews("a", d1, d2, a.days)
+    total = g.total()
+    assert total.username == "Group total"
+    assert total.days == [ReviewDay(d1, 12, None, 14.0), ReviewDay(d2, 1, None, None)]
+    assert GroupReviews("g", d1, d2).total().days == []

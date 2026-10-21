@@ -133,7 +133,7 @@ class SignupResponse:
 
 
 @dataclass(frozen=True)
-class FriendDay:
+class ReviewDay:
     study_date: date
     total_reviews: int
     retention: float | None = None
@@ -141,34 +141,147 @@ class FriendDay:
 
     @classmethod
     def from_dict(cls, data: Any) -> Self:
-        d = _obj(data, "FriendDay")
+        d = _obj(data, "ReviewDay")
         return cls(
-            study_date=_get(d, "FriendDay", "study_date", _date),
-            total_reviews=_get(d, "FriendDay", "total_reviews", _int),
-            retention=_get(d, "FriendDay", "retention", _float, None),
-            study_minutes=_get(d, "FriendDay", "study_minutes", _float, None),
+            study_date=_get(d, "ReviewDay", "study_date", _date),
+            total_reviews=_get(d, "ReviewDay", "total_reviews", _int),
+            retention=_get(d, "ReviewDay", "retention", _float, None),
+            study_minutes=_get(d, "ReviewDay", "study_minutes", _float, None),
         )
-
-
-def _friend_days(value: Any) -> list[FriendDay]:
-    if not isinstance(value, list):
-        raise ValueError(f"expected list, got {type(value).__name__}")
-    return [FriendDay.from_dict(item) for item in value]
 
 
 @dataclass(frozen=True)
-class ProfileReviews:
+class YearReviews:
+    """One person's daily rows over a date range: the input the heatmap draws."""
+
     username: str
     start: date
     end: date
-    days: list[FriendDay] = field(default_factory=list)
+    days: list[ReviewDay] = field(default_factory=list)
+
+
+def _list[T](parse: Callable[[Any], T]) -> Callable[[Any], list[T]]:
+    def parse_list(value: Any) -> list[T]:
+        if not isinstance(value, list):
+            raise ValueError(f"expected list, got {type(value).__name__}")
+        return [parse(item) for item in value]
+
+    return parse_list
+
+
+@dataclass(frozen=True)
+class GroupSummary:
+    id: str
+    name: str
+    role: str
+    member_count: int
 
     @classmethod
     def from_dict(cls, data: Any) -> Self:
-        d = _obj(data, "ProfileReviews")
+        d = _obj(data, "GroupSummary")
         return cls(
-            username=_get(d, "ProfileReviews", "username", _str),
-            start=_get(d, "ProfileReviews", "start", _date),
-            end=_get(d, "ProfileReviews", "end", _date),
-            days=_get(d, "ProfileReviews", "days", _friend_days, None) or [],
+            id=_get(d, "GroupSummary", "id", _str),
+            name=_get(d, "GroupSummary", "name", _str),
+            role=_get(d, "GroupSummary", "role", _str),
+            member_count=_get(d, "GroupSummary", "member_count", _int),
         )
+
+
+@dataclass(frozen=True)
+class GroupMember:
+    username: str
+    role: str
+    joined_at: datetime
+
+    @classmethod
+    def from_dict(cls, data: Any) -> Self:
+        d = _obj(data, "GroupMember")
+        return cls(
+            username=_get(d, "GroupMember", "username", _str),
+            role=_get(d, "GroupMember", "role", _str),
+            joined_at=_get(d, "GroupMember", "joined_at", _datetime),
+        )
+
+
+@dataclass(frozen=True)
+class Group:
+    """`invite_code` and `allowed` are None unless the caller owns the group."""
+
+    id: str
+    name: str
+    owner: str | None = None
+    members: list[GroupMember] = field(default_factory=list)
+    invite_code: str | None = None
+    allowed: list[str] | None = None
+
+    @classmethod
+    def from_dict(cls, data: Any) -> Self:
+        d = _obj(data, "Group")
+        return cls(
+            id=_get(d, "Group", "id", _str),
+            name=_get(d, "Group", "name", _str),
+            owner=_get(d, "Group", "owner", _str, None),
+            members=_get(d, "Group", "members", _list(GroupMember.from_dict), None) or [],
+            invite_code=_get(d, "Group", "invite_code", _str, None),
+            allowed=_get(d, "Group", "allowed", _list(_str), None),
+        )
+
+
+@dataclass(frozen=True)
+class InviteCode:
+    invite_code: str
+
+    @classmethod
+    def from_dict(cls, data: Any) -> Self:
+        d = _obj(data, "InviteCode")
+        return cls(invite_code=_get(d, "InviteCode", "invite_code", _str))
+
+
+@dataclass(frozen=True)
+class MemberReviews:
+    username: str
+    days: list[ReviewDay] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: Any) -> Self:
+        d = _obj(data, "MemberReviews")
+        return cls(
+            username=_get(d, "MemberReviews", "username", _str),
+            days=_get(d, "MemberReviews", "days", _list(ReviewDay.from_dict), None) or [],
+        )
+
+
+@dataclass(frozen=True)
+class GroupReviews:
+    group_id: str
+    start: date
+    end: date
+    members: list[MemberReviews] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: Any) -> Self:
+        d = _obj(data, "GroupReviews")
+        return cls(
+            group_id=_get(d, "GroupReviews", "group_id", _str),
+            start=_get(d, "GroupReviews", "start", _date),
+            end=_get(d, "GroupReviews", "end", _date),
+            members=_get(d, "GroupReviews", "members", _list(MemberReviews.from_dict), None) or [],
+        )
+
+    def year_for(self, member: MemberReviews) -> YearReviews:
+        return YearReviews(member.username, self.start, self.end, member.days)
+
+    def total(self, username: str = "Group total") -> YearReviews:
+        """Everyone's reviews and study minutes summed per day (no combined retention)."""
+        reviews: dict[date, int] = {}
+        minutes: dict[date, float] = {}
+        for member in self.members:
+            for day in member.days:
+                reviews[day.study_date] = reviews.get(day.study_date, 0) + day.total_reviews
+                if day.study_minutes is not None:
+                    minutes[day.study_date] = minutes.get(day.study_date, 0.0) + day.study_minutes
+        days = [
+            ReviewDay(d, reviews[d], None, minutes.get(d))
+            for d in sorted(reviews)
+        ]
+        return YearReviews(username, self.start, self.end, days)

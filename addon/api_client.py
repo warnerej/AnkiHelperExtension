@@ -1,6 +1,6 @@
 import random
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import quote
 
@@ -8,7 +8,15 @@ import httpx
 
 from .errors import ApiError, AuthError, NetworkError, NotConfiguredError, ServerError
 from .log import get_logger
-from .models import DailyReview, ProfileReviews, SignupResponse, UserResponse
+from .models import (
+    DailyReview,
+    Group,
+    GroupReviews,
+    GroupSummary,
+    InviteCode,
+    SignupResponse,
+    UserResponse,
+)
 from .session import Session, check_response
 from .settings import Settings
 from .stats import TodayStats
@@ -20,6 +28,24 @@ BACKOFF_BASE = 0.5
 HEATMAP_DAYS = 365
 
 log = get_logger()
+
+
+def _group_path(group_id: str) -> str:
+    return f"/groups/{quote(group_id, safe='')}"
+
+
+def _as_list(data: Any) -> list[Any]:
+    if not isinstance(data, list):
+        raise ValueError(f"expected list, got {type(data).__name__}")
+    return data
+
+
+def _parse[T](path: str, build: Callable[[], T]) -> T:
+    """Run `build`, mapping a malformed body (ValueError) to ServerError."""
+    try:
+        return build()
+    except ValueError as exc:
+        raise ServerError(f"Unexpected response from {path}") from exc
 
 
 class ApiClient:
@@ -66,7 +92,7 @@ class ApiClient:
 
     def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         method = method.upper()
-        retries = GET_RETRIES if method in ("GET", "PUT") else 0
+        retries = GET_RETRIES if method in ("GET", "PUT", "DELETE") else 0
         for attempt in range(retries + 1):
             try:
                 return self._request_once(method, path, **kwargs)
@@ -94,6 +120,12 @@ class ApiClient:
     def put(self, path: str, **kwargs: Any) -> httpx.Response:
         return self.request("PUT", path, **kwargs)
 
+    def patch(self, path: str, **kwargs: Any) -> httpx.Response:
+        return self.request("PATCH", path, **kwargs)
+
+    def delete(self, path: str, **kwargs: Any) -> httpx.Response:
+        return self.request("DELETE", path, **kwargs)
+
     def put_daily_reviews(self, stats: TodayStats) -> DailyReview:
         """Upsert the running stats for the day (idempotent, safe to retry)."""
         body: dict[str, Any] = {
@@ -116,33 +148,69 @@ class ApiClient:
         except ValueError as exc:
             raise ServerError("Unexpected response from /auth/me") from exc
 
-    def get_profile_reviews(
-        self, username: str, days: int = HEATMAP_DAYS
-    ) -> ProfileReviews:
-        """A user's review rows for the past `days` days (404 raises ApiError)."""
-        path = f"/profiles/{quote(username, safe='')}/reviews"
-        try:
-            return ProfileReviews.from_dict(
-                self.get(path, params={"days": days}).json()
-            )
-        except ValueError as exc:
-            raise ServerError(f"Unexpected response from {path}") from exc
+    # --- groups ---
 
-    def get_friends_reviews(
-        self, usernames: Iterable[str] | None = None
-    ) -> dict[str, ProfileReviews | None]:
-        """Fetch each friend's last year. Unknown usernames map to None."""
-        if usernames is None:
-            usernames = self._get_settings().friends
-        result: dict[str, ProfileReviews | None] = {}
-        for name in usernames:
-            try:
-                result[name] = self.get_profile_reviews(name)
-            except ApiError as exc:
-                if exc.status_code != 404:
-                    raise
-                result[name] = None
-        return result
+    def list_groups(self) -> list[GroupSummary]:
+        path = "/groups"
+        return _parse(path, lambda: [GroupSummary.from_dict(g) for g in _as_list(self.get(path).json())])
+
+    def get_group(self, group_id: str) -> Group:
+        """Group detail; `invite_code` and `allowed` are set only for the owner."""
+        path = _group_path(group_id)
+        return _parse(path, lambda: Group.from_dict(self.get(path).json()))
+
+    def create_group(self, name: str) -> Group:
+        return _parse("/groups", lambda: Group.from_dict(self.post("/groups", json={"name": name}).json()))
+
+    def rename_group(self, group_id: str, name: str) -> Group:
+        path = _group_path(group_id)
+        return _parse(path, lambda: Group.from_dict(self.patch(path, json={"name": name}).json()))
+
+    def delete_group(self, group_id: str) -> None:
+        self.delete(_group_path(group_id))
+
+    def join_group(self, invite_code: str) -> Group:
+        try:
+            resp = self.post("/groups/join", json={"invite_code": invite_code})
+        except ApiError as exc:
+            if exc.status_code == 404:
+                raise ApiError(
+                    404,
+                    "Code not found, or your username isn't on this group's allowed list.",
+                ) from exc
+            if exc.status_code == 429:
+                raise ApiError(429, "Too many attempts. Try again later.") from exc
+            raise
+        return _parse("/groups/join", lambda: Group.from_dict(resp.json()))
+
+    def leave_group(self, group_id: str) -> None:
+        try:
+            self.post(f"{_group_path(group_id)}/leave")
+        except ApiError as exc:
+            if exc.status_code == 409:
+                raise ApiError(
+                    409,
+                    "Owners can't leave; transfer ownership or delete the group.",
+                ) from exc
+            raise
+
+    def allow_username(self, group_id: str, username: str) -> None:
+        self.post(f"{_group_path(group_id)}/allowed", json={"username": username})
+
+    def disallow_username(self, group_id: str, username: str) -> None:
+        self.delete(f"{_group_path(group_id)}/allowed/{quote(username, safe='')}")
+
+    def regenerate_invite_code(self, group_id: str) -> str:
+        path = f"{_group_path(group_id)}/invite-code"
+        return _parse(path, lambda: InviteCode.from_dict(self.post(path).json()).invite_code)
+
+    def transfer_ownership(self, group_id: str, username: str) -> None:
+        self.post(f"{_group_path(group_id)}/transfer", json={"username": username})
+
+    def get_group_reviews(self, group_id: str, days: int = HEATMAP_DAYS) -> GroupReviews:
+        """Every joined member's review rows for the past `days` days."""
+        path = f"{_group_path(group_id)}/reviews"
+        return _parse(path, lambda: GroupReviews.from_dict(self.get(path, params={"days": days}).json()))
 
     def login(self, email: str, password: str) -> None:
         """Log in and persist the refresh token (never retried; password not kept)."""

@@ -28,11 +28,18 @@ def strip_legacy_credentials(
     return config, had_password
 
 
+def strip_friends(config: dict[str, Any] | None) -> tuple[dict[str, Any], bool]:
+    """Config without the retired `friends` list, and whether it listed anyone
+    (the cue for the one-time "sharing now works through groups" note)."""
+    config = dict(config or {})
+    had_friends = bool(config.pop("friends", None))
+    return config, had_friends
+
+
 @dataclass(frozen=True)
 class Settings:
     base_url: str
     timeout_seconds: float = DEFAULT_TIMEOUT
-    friends: tuple[str, ...] = ()
 
     @classmethod
     def from_config(cls, config: dict[str, Any] | None) -> "Settings":
@@ -53,14 +60,4 @@ class Settings:
             timeout = DEFAULT_TIMEOUT
         if timeout <= 0:
             timeout = DEFAULT_TIMEOUT
-        raw_friends = config.get("friends")
-        friends: list[str] = []
-        if isinstance(raw_friends, list):
-            for item in raw_friends:
-                name = str(item).strip().lower()
-                if USERNAME_RE.fullmatch(name):
-                    if name not in friends:
-                        friends.append(name)
-                else:
-                    log.info("ignoring invalid friend username %r", name)
-        return cls(base_url, timeout, tuple(friends))
+        return cls(base_url, timeout)

@@ -345,67 +345,6 @@ def test_put_retries_on_502_but_not_422(backend, make_client):
     assert backend.count("PUT", "/reviews/daily") == 1
 
 
-PROFILE = {
-    "username": "bob",
-    "start": "2026-01-02",
-    "end": "2026-01-31",
-    "days": [
-        {
-            "study_date": "2026-01-31",
-            "total_reviews": 10,
-            "retention": 90.0,
-            "study_minutes": 5,
-        },
-        {
-            "study_date": "2026-01-30",
-            "total_reviews": 4,
-            "retention": None,
-            "study_minutes": None,
-        },
-    ],
-}
-
-
-def test_get_profile_reviews_parses(backend, make_client):
-    backend.on("POST", "/auth/login", (200, tokens(1)))
-    backend.on("GET", "/profiles/bob/reviews", (200, PROFILE))
-    result = make_client().get_profile_reviews("bob")
-    assert backend.calls[1].url.params["days"] == "365"
-    assert [d.total_reviews for d in result.days] == [10, 4]
-    assert backend.calls[1].headers["Authorization"] == "Bearer access1"
-
-
-def test_friends_404_is_none_and_401_refreshes(backend, make_client):
-    backend.on("POST", "/auth/login", (200, tokens(1)))
-    backend.on("POST", "/auth/refresh", (200, tokens(2)))
-    backend.on("GET", "/profiles/bob/reviews", (401, {}), (200, PROFILE))
-    backend.on("GET", "/profiles/ghost/reviews", (404, {"detail": "no user"}))
-    result = make_client().get_friends_reviews(["bob", "ghost"])
-    assert result["bob"] is not None and result["ghost"] is None
-    assert backend.count("POST", "/auth/refresh") == 1
-
-
-def test_friends_502_retried_then_raises(backend, make_client):
-    backend.on("POST", "/auth/login", (200, tokens(1)))
-    backend.on("GET", "/profiles/bob/reviews", (502, {}))
-    with pytest.raises(ServerError):
-        make_client().get_friends_reviews(["bob"])
-    assert backend.count("GET", "/profiles/bob/reviews") == 3
-
-
-def test_friends_default_from_settings(backend, make_client, settings, store):
-    backend.on("POST", "/auth/login", (200, tokens(1)))
-    backend.on("GET", "/profiles/bob/reviews", (200, PROFILE))
-    import dataclasses
-
-    from addon.api_client import ApiClient
-
-    s = dataclasses.replace(settings, friends=("bob",))
-    client = ApiClient(lambda: s, store, transport=httpx.MockTransport(backend))
-    client.login("a@b.c", "pw")
-    assert list(client.get_friends_reviews()) == ["bob"]
-
-
 SIGNUP_BODY = {"email": "a@b.c", "password": "pw-secret", "username": "bob"}
 
 
@@ -467,10 +406,159 @@ def test_signup_network_failure_not_retried(backend, make_client):
     assert backend.count("POST", "/auth/signup") == 1
 
 
-def test_settings_friends():
-    base = {"base_url": "https://x.io"}
-    s = Settings.from_config(
-        {**base, "friends": ["Al", "alice", "ALICE", "bad name", "x" * 21]}
+def test_strip_friends():
+    from addon.settings import strip_friends
+
+    cleaned, had = strip_friends({"base_url": "x", "friends": ["a"]})
+    assert cleaned == {"base_url": "x"} and had
+    assert strip_friends({"base_url": "x", "friends": []}) == ({"base_url": "x"}, False)
+    assert strip_friends({"base_url": "x"}) == ({"base_url": "x"}, False)
+
+
+GROUP = {
+    "id": "g1",
+    "name": "Study",
+    "owner": "bob",
+    "members": [{"username": "bob", "role": "owner", "joined_at": "2026-01-01T00:00:00Z"}],
+}
+OWNER_GROUP = {**GROUP, "invite_code": "ABC123", "allowed": ["bob", "amy"]}
+
+
+def logged_in(backend):
+    backend.on("POST", "/auth/login", (200, tokens(1)))
+
+
+def test_list_groups(backend, make_client):
+    logged_in(backend)
+    backend.on(
+        "GET",
+        "/groups",
+        (200, [{"id": "g1", "name": "Study", "role": "owner", "member_count": 3}]),
     )
-    assert s.friends == ("alice",)
-    assert Settings.from_config(base).friends == ()
+    groups = make_client().list_groups()
+    assert [(g.id, g.role, g.member_count) for g in groups] == [("g1", "owner", 3)]
+    assert backend.calls[1].headers["Authorization"] == "Bearer access1"
+
+
+def test_get_group_owner_vs_member(backend, make_client):
+    logged_in(backend)
+    backend.on("GET", "/groups/g1", (200, OWNER_GROUP), (200, GROUP))
+    client = make_client()
+    owner_view = client.get_group("g1")
+    assert owner_view.invite_code == "ABC123" and owner_view.allowed == ["bob", "amy"]
+    member_view = client.get_group("g1")
+    assert member_view.invite_code is None and member_view.allowed is None
+
+
+def test_create_rename_delete_group(backend, make_client):
+    logged_in(backend)
+    backend.on("POST", "/groups", (201, OWNER_GROUP))
+    backend.on("PATCH", "/groups/g1", (200, {**GROUP, "name": "New"}))
+    backend.on("DELETE", "/groups/g1", (204, None))
+    client = make_client()
+    assert client.create_group("Study").invite_code == "ABC123"
+    assert backend.body(1) == {"name": "Study"}
+    assert client.rename_group("g1", "New").name == "New"
+    assert backend.body(2) == {"name": "New"}
+    client.delete_group("g1")
+    assert backend.calls[3].method == "DELETE"
+
+
+def test_join_group_maps_404_and_429(backend, make_client):
+    logged_in(backend)
+    backend.on("POST", "/groups/join", (404, {"detail": "x"}), (429, {}), (200, GROUP))
+    client = make_client()
+    with pytest.raises(ApiError, match="Code not found") as exc:
+        client.join_group("bad")
+    assert exc.value.status_code == 404
+    with pytest.raises(ApiError, match="Too many") as exc:
+        client.join_group("bad")
+    assert exc.value.status_code == 429
+    assert client.join_group("ABC123").id == "g1"
+    assert backend.body(3) == {"invite_code": "ABC123"}
+    assert backend.count("POST", "/groups/join") == 3
+
+
+def test_leave_group_maps_409(backend, make_client):
+    logged_in(backend)
+    backend.on("POST", "/groups/g1/leave", (409, {"detail": "owner"}), (204, None))
+    client = make_client()
+    with pytest.raises(ApiError, match="Owners can't leave") as exc:
+        client.leave_group("g1")
+    assert exc.value.status_code == 409
+    client.leave_group("g1")
+
+
+def test_allowed_invite_and_transfer(backend, make_client):
+    logged_in(backend)
+    backend.on("POST", "/groups/g1/allowed", (201, {}))
+    backend.on("DELETE", "/groups/g1/allowed/a b", (204, None))
+    backend.on("POST", "/groups/g1/invite-code", (200, {"invite_code": "NEW999"}))
+    backend.on("POST", "/groups/g1/transfer", (200, {}))
+    client = make_client()
+    client.allow_username("g1", "amy")
+    assert backend.body(1) == {"username": "amy"}
+    client.disallow_username("g1", "a b")
+    assert backend.calls[2].url.raw_path == b"/groups/g1/allowed/a%20b"
+    assert client.regenerate_invite_code("g1") == "NEW999"
+    client.transfer_ownership("g1", "amy")
+    assert backend.body(4) == {"username": "amy"}
+
+
+def test_get_group_reviews(backend, make_client):
+    logged_in(backend)
+    backend.on(
+        "GET",
+        "/groups/g1/reviews",
+        (
+            200,
+            {
+                "group_id": "g1",
+                "start": "2026-01-01",
+                "end": "2026-01-02",
+                "members": [
+                    {"username": "bob", "days": [{"study_date": "2026-01-02", "total_reviews": 5}]},
+                    {"username": "amy", "days": []},
+                ],
+            },
+        ),
+    )
+    result = make_client().get_group_reviews("g1")
+    assert backend.calls[1].url.params["days"] == "365"
+    assert [(m.username, len(m.days)) for m in result.members] == [("bob", 1), ("amy", 0)]
+
+
+def test_group_get_and_delete_retry_but_post_patch_do_not(backend, make_client):
+    logged_in(backend)
+    backend.on("GET", "/groups", (502, {}))
+    backend.on("DELETE", "/groups/g1", (502, {}))
+    backend.on("PATCH", "/groups/g1", (502, {}))
+    backend.on("POST", "/groups", (502, {}))
+    client = make_client()
+    with pytest.raises(ServerError):
+        client.list_groups()
+    with pytest.raises(ServerError):
+        client.delete_group("g1")
+    with pytest.raises(ServerError):
+        client.rename_group("g1", "n")
+    with pytest.raises(ServerError):
+        client.create_group("n")
+    assert backend.count("GET", "/groups") == 3
+    assert backend.count("DELETE", "/groups/g1") == 3
+    assert backend.count("PATCH", "/groups/g1") == 1
+    assert backend.count("POST", "/groups") == 1
+
+
+def test_group_call_refreshes_on_401(backend, make_client):
+    logged_in(backend)
+    backend.on("POST", "/auth/refresh", (200, tokens(2)))
+    backend.on("GET", "/groups", (401, {}), (200, []))
+    assert make_client().list_groups() == []
+    assert backend.count("POST", "/auth/refresh") == 1
+
+
+def test_malformed_group_body_is_server_error(backend, make_client):
+    logged_in(backend)
+    backend.on("GET", "/groups", (200, {"oops": 1}))
+    with pytest.raises(ServerError):
+        make_client().list_groups()

@@ -1,4 +1,4 @@
-"""Pure decisions for lazily loading friends (kept free of aqt for testing)."""
+"""Pure decisions for lazily loading group reviews (kept free of aqt for testing)."""
 
 from .errors import NetworkError, ServerError
 
@@ -12,7 +12,7 @@ RETRY_SECONDS = 15
 
 
 def action_on_open(status: str, age: float) -> str | None:
-    """What to do when the Friends tab is shown: 'fetch', 'refresh' or None."""
+    """What to do when the Groups tab is shown: 'fetch', 'refresh' or None."""
     # LOADING counts too: a retry may have lapsed while another tab was showing.
     if status in (IDLE, ERROR, LOADING):
         return "fetch"

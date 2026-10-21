@@ -4,15 +4,15 @@
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 ![Anki add-on](https://img.shields.io/badge/Anki-add--on-informational)
 
-An Anki add-on that turns private study stats into a shared, social progress view. It reads review history from the local Anki collection, pushes daily totals to the AnkiHelper backend (FastAPI + Supabase), and draws a GitHub-style year heatmap of your reviews, and your friends', on Anki's deck browser.
+An Anki add-on that turns private study stats into a shared, social progress view. It reads review history from the local Anki collection, pushes daily totals to the AnkiHelper backend (FastAPI + Supabase), and draws a GitHub-style year heatmap of your reviews, and your groups', on Anki's deck browser.
 
 > Backend: https://github.com/warnerej/AnkiHelper (separate repository). The add-on needs a running backend to sync.
 
 ## Screenshots
 
-| My stats | Friends |
+| My stats | Groups |
 | --- | --- |
-| ![My heatmap](docs/images/heatmap-mine.png) | ![Friends heatmap](docs/images/heatmap-friends.png) |
+| ![My heatmap](docs/images/heatmap-mine.png) | ![Groups heatmap](docs/images/heatmap-friends.png) |
 
 ## How it works
 
@@ -20,7 +20,7 @@ An Anki add-on that turns private study stats into a shared, social progress vie
 flowchart LR
     A[Anki collection<br/>revlog] -->|stats.py| B[Daily totals]
     B -->|ApiClient + Session| C[(AnkiHelper API<br/>FastAPI + Supabase)]
-    C -->|GET /profiles/…/reviews| D[friends_loader.py]
+    C -->|GET /groups/{id}/reviews| D[group_loader.py]
     A -->|year_stats| E[heatmap.py]
     D --> E
     E -->|deck_browser_will_render_content| F[Deck browser]
@@ -30,15 +30,17 @@ flowchart LR
 
 **Authentication.** Log in or sign up from Tools > AnkiHelper. The password is sent once and never stored; the access token stays in memory and only the refresh token is saved, atomically, to `user_files/session.json` (which survives add-on updates). On startup the session is restored from that token. Tokens are refreshed shortly before they expire. On a 401 the client refreshes once and retries once; if the refresh is rejected the file is cleared and the user is asked to log in again. Log out calls `POST /auth/logout` and deletes the file. Refresh tokens rotate and are single use, so refreshes are single-flight: when several threads hit a 401 together, only one refresh is sent and the rest reuse its result.
 
-**Friends and heatmaps.** Your own year is computed locally from `revlog`. Friends are fetched with `GET /profiles/{username}/reviews?days=365` for each name in the `friends` config list. They load lazily the first time the Friends tab is opened, refresh after 5 minutes, and while the server is down or waking up the add-on retries every 15 seconds. A failed background refresh keeps the previous data on screen. The heatmap is a Monday-first SVG grid with 10 colour levels scaled to each person's own data, plus daily average, days-learned %, longest and current streak, and a per-day tooltip.
+**Groups screen.** Tools > AnkiHelper > Groups... (or "Manage groups" on the Groups tab) opens a non-modal dialog. It lists your groups (name, role, member count) and lets you create a group or join one with an invite code (after a confirmation that joining shares your last year of stats). Members can see the member list and leave; owners also get the invite code (copy/regenerate), the allowed-username list (removing a name also removes that member), rename, transfer ownership and delete (type the group name to confirm). The decisions live in `groups_logic.py` (tested); `groups_dialog.py` is the thin Qt layer and all calls run off the main thread.
+
+**Groups and heatmaps.** Your own year is computed locally from `revlog`. The Groups tab has a picker (the choice is remembered in the `selected_group` config key) and shows a Group total heatmap followed by one heatmap per member, from one `GET /groups/{id}/reviews?days=365` call per group. With no groups it offers to open the Groups screen; with only you in the group it shows an invite hint. Data loads lazily the first time the Groups tab is opened, refresh after 5 minutes, and while the server is down or waking up the add-on retries every 15 seconds. A failed background refresh keeps the previous data on screen. The heatmap is a Monday-first SVG grid with 10 colour levels scaled to each person's own data, plus daily average, days-learned %, longest and current streak, and a per-day tooltip.
 
 ## Engineering highlights
 
 - **UI never blocks.** All network calls run through `mw.taskman.run_in_background`; workers use a config snapshot and never touch `mw`.
 - **Resilient HTTP.** GET and PUT retry on network errors and 5xx with jittered exponential backoff; POST is never retried. Errors map to a typed hierarchy (`errors.py`: `AuthError`, `NetworkError`, `ServerError`, `ApiError`, …).
-- **Validated boundaries.** Responses are parsed into typed frozen dataclasses (`from_dict`, stdlib only); settings are validated up front (https required except for localhost, username format, de-duplicated friends).
+- **Validated boundaries.** Responses are parsed into typed frozen dataclasses (`from_dict`, stdlib only); settings are validated up front (https required except for localhost, username format, username format).
 - **Secrets handled carefully.** The password is never written to disk (only a rotating refresh token, in a private file), a logging filter redacts bearer tokens and credentials (and is tested), and the config holds no secrets. The add-on talks only to the AnkiHelper API, never to Supabase directly.
-- **Testable design.** Logic lives in pure modules (`stats`, `heatmap`, `friends_loader`, `friends_state`, `session`, `token_store`); only `ui.py` imports `aqt`, and `addon/__init__.py` skips UI setup when Anki is absent so tests run in plain Python.
+- **Testable design.** Logic lives in pure modules (`stats`, `heatmap`, `group_loader`, `group_state`, `groups_logic`, `session`, `token_store`); only `ui.py` imports `aqt`, and `addon/__init__.py` skips UI setup when Anki is absent so tests run in plain Python.
 - **Matches Anki's runtime.** Python is pinned to 3.13 to match Anki's bundled interpreter, and the one runtime dependency (`httpx`, pure Python) is vendored since Anki does not provide it.
 
 ## Setup
@@ -60,7 +62,7 @@ flowchart LR
 | Option | Description |
 | --- | --- |
 | `base_url` | Backend URL. `https` required, except for `localhost`. |
-| `friends` | Usernames whose last year of reviews is shown. There is no friends-list endpoint yet. |
+| `selected_group` | Group shown on the Groups tab; set automatically. An old `friends` list is removed on startup (with a one-time note). |
 | `timeout_seconds` | HTTP timeout (default 15). |
 | `debug_logging` | Write a redacted rotating log to `addon/user_files/ankihelper.log`. |
 
@@ -71,7 +73,8 @@ flowchart LR
 - **Log out**: `POST /auth/logout`, then deletes the stored token.
 - **Test connection**: calls `GET /auth/me` with the current session.
 - **Push today's reviews**: `PUT /reviews/daily` (also runs automatically).
-- **Refresh friends**: re-fetches each friend's reviews; unknown usernames are skipped.
+- **Groups...**: opens the Groups screen.
+- **Refresh groups**: re-fetches the group list and the selected group's reviews.
 
 ### API endpoints used
 
@@ -81,7 +84,8 @@ flowchart LR
 | `POST /auth/login`, `/auth/refresh`, `/auth/logout` | Session handling |
 | `GET /auth/me` | Test connection |
 | `PUT /reviews/daily` | Push today's running totals |
-| `GET /profiles/{username}/reviews` | A friend's past year (404 if no such user) |
+| `GET /groups`, `GET /groups/{id}/reviews` | Group list and the selected group's past year |
+| `/groups/...` (create, join, leave, allow, ...) | Groups screen |
 
 ## Development
 
@@ -93,7 +97,7 @@ uv run pyright
 scripts/package.sh   # builds dist/ankihelper.ankiaddon
 ```
 
-Tests use a scriptable `httpx.MockTransport` backend (no network) and a real temporary Anki `Collection` for the stats queries. They cover login/refresh/retry behaviour including concurrent 401s, request retry rules, the stats calculations, heatmap rendering, the friends-loading state machine (`FriendsLoader` with fake scheduling) and log redaction. `ui.py` is not unit-tested because it needs a running Qt/Anki.
+Tests use a scriptable `httpx.MockTransport` backend (no network) and a real temporary Anki `Collection` for the stats queries. They cover login/refresh/retry behaviour including concurrent 401s, request retry rules, the stats calculations, heatmap rendering, the group-loading state machine (`GroupLoader` with fake scheduling) and log redaction. `ui.py` is not unit-tested because it needs a running Qt/Anki.
 
 Packaging note: the vendored dependencies are pure Python, so a `.ankiaddon` built on one OS works on macOS, Windows and Linux.
 
@@ -108,8 +112,10 @@ addon/
   token_store.py     refresh token file in user_files/ (atomic writes)
   stats.py           revlog -> daily and yearly stats
   heatmap.py         HTML/SVG/CSS/JS heatmap rendering
-  friends_loader.py  background friends fetch, load state and retry timer (Anki bits injected)
-  friends_state.py   pure load/retry decisions used by the loader
+  group_loader.py    background group fetch, load state and retry timer (Anki bits injected)
+  group_state.py     pure load/retry decisions used by the loader
+  groups_logic.py    pure Groups-screen decisions
+  groups_dialog.py   Groups screen (Qt)
   models.py          response dataclasses (`from_dict` parsing)
   settings.py        validated config
   errors.py          exception hierarchy
@@ -120,7 +126,6 @@ scripts/package.sh   builds the .ankiaddon
 
 ## Limitations and next steps
 
-- Friends are configured by username; a friends-list endpoint on the backend would remove that.
 - No CI yet.
 
 ## License

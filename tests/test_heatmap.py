@@ -7,15 +7,21 @@ from addon.heatmap import (
     format_tooltip,
     legend_for,
     level_for,
-    render_friends_html,
     render_heatmap_html,
+    render_members_html,
 )
-from addon.models import FriendDay, ProfileReviews
+from addon.models import (
+    GroupReviews,
+    GroupSummary,
+    MemberReviews,
+    ReviewDay,
+    YearReviews,
+)
 
 
-def profile(days: list[FriendDay]) -> ProfileReviews:
+def profile(days: list[ReviewDay]) -> YearReviews:
     # Mon 2026-09-14 .. Tue 2026-10-13 (30 days)
-    return ProfileReviews(
+    return YearReviews(
         username="bob", start=date(2026, 9, 14), end=date(2026, 10, 13), days=days
     )
 
@@ -31,7 +37,7 @@ def test_grid_shape_and_padding():
 
 
 def test_padding_before_start():
-    p = ProfileReviews(username="a", start=date(2026, 9, 16), end=date(2026, 9, 20))
+    p = YearReviews(username="a", start=date(2026, 9, 16), end=date(2026, 9, 20))
     grid = build_grid(p)
     assert grid[0][0] is None and grid[0][1] is None
     assert grid[0][2] is not None and grid[0][2].day == date(2026, 9, 16)
@@ -39,8 +45,8 @@ def test_padding_before_start():
 
 def test_lit_only_with_reviews():
     days = [
-        FriendDay(study_date=date(2026, 9, 14), total_reviews=5),
-        FriendDay(study_date=date(2026, 9, 15), total_reviews=0),
+        ReviewDay(study_date=date(2026, 9, 14), total_reviews=5),
+        ReviewDay(study_date=date(2026, 9, 15), total_reviews=0),
     ]
     grid = build_grid(profile(days))
     assert grid[0][0] is not None and grid[0][0].lit
@@ -63,8 +69,8 @@ def test_tooltip_missing_values_and_no_reviews():
 
 
 def test_html_is_chronological_with_name_and_tooltips():
-    days = [FriendDay(study_date=date(2026, 9, 14), total_reviews=5, retention=90)]
-    html = render_friends_html({"bob": profile(days), "ghost": None})
+    days = [ReviewDay(study_date=date(2026, 9, 14), total_reviews=5, retention=90)]
+    html = render_members_html({"bob": profile(days), "ghost": None})
     assert html.index(">bob<") < html.index("ghost (user not found)")
     first = html.index("Mon 14 Sep")
     last = html.index("Tue 13 Oct")
@@ -75,7 +81,7 @@ def test_html_is_chronological_with_name_and_tooltips():
 
 
 def test_svg_labels_and_colours():
-    html = render_friends_html({"bob": profile([])})
+    html = render_members_html({"bob": profile([])})
     assert html.count('x="0" y=') == 7
     assert ">Sep<" in html and ">Oct<" in html
     assert "ah-today" not in html
@@ -93,9 +99,9 @@ def test_level_for():
 
 def test_compute_stats():
     days = [
-        FriendDay(study_date=date(2026, 9, 14), total_reviews=10),
-        FriendDay(study_date=date(2026, 9, 15), total_reviews=30),
-        FriendDay(study_date=date(2026, 10, 12), total_reviews=20),
+        ReviewDay(study_date=date(2026, 9, 14), total_reviews=10),
+        ReviewDay(study_date=date(2026, 9, 15), total_reviews=30),
+        ReviewDay(study_date=date(2026, 10, 12), total_reviews=20),
     ]
     stats = compute_stats(profile(days))
     assert stats.average == 20
@@ -106,44 +112,81 @@ def test_compute_stats():
 
 
 def test_html_escapes_and_empty():
-    assert render_friends_html({}) == ""
-    p = ProfileReviews(username="x", start=date(2026, 9, 14), end=date(2026, 9, 14))
-    assert "<b>" not in render_friends_html({"<b>": p})
+    assert render_members_html({}) == ""
+    p = YearReviews(username="x", start=date(2026, 9, 14), end=date(2026, 9, 14))
+    assert "<b>" not in render_members_html({"<b>": p})
 
 
 def test_year_window():
     # Mon 2025-10-20 .. Sat 2026-10-17 (363 days), January label carries the year
-    p = ProfileReviews(
+    p = YearReviews(
         username="bob",
         start=date(2025, 10, 20),
         end=date(2026, 10, 17),
-        days=[FriendDay(study_date=date(2026, 10, 17), total_reviews=30)],
+        days=[ReviewDay(study_date=date(2026, 10, 17), total_reviews=30)],
     )
     grid = build_grid(p)
     assert len(grid) == 52
-    html = render_friends_html({"bob": p})
+    html = render_members_html({"bob": p})
     assert "Jan &#x27;26" in html or "Jan '26" in html
     assert 'class="ah-scroll"' in html
     assert compute_stats(p).learned_percent == 0
 
 
+def group(*members: tuple[str, int]) -> GroupReviews:
+    return GroupReviews(
+        "g1",
+        date(2026, 1, 1),
+        date(2026, 1, 31),
+        [
+            MemberReviews(name, [ReviewDay(study_date=date(2026, 1, 5), total_reviews=n)])
+            for name, n in members
+        ],
+    )
+
+
+G1 = GroupSummary("g1", "Crew <1>", "owner", 2)
+G2 = GroupSummary("g2", "Other", "member", 1)
+
+
 def test_heatmap_toggle_views():
-    mine = profile([FriendDay(study_date=date(2026, 1, 5), total_reviews=3)])
-    friends = {"bob": profile([])}
-    own = render_heatmap_html(mine, friends, "mine")
+    mine = profile([ReviewDay(study_date=date(2026, 1, 5), total_reviews=3)])
+    own = render_heatmap_html(mine, [G1], "g1", group(("bob", 1), ("al", 2)), "mine")
     assert "My stats" in own and "bob</div>" not in own
-    assert "ankihelper:view:friends" in own
-    other = render_heatmap_html(mine, friends, "friends")
-    assert "bob</div>" in other and "ah-friend" in other
-    assert "No friends configured" in render_heatmap_html(mine, {}, "friends")
-    assert "ah-toggle" in render_heatmap_html(None, {}, "mine")
+    assert "ankihelper:view:groups" in own
+    other = render_heatmap_html(mine, [G1], "g1", group(("bob", 1), ("al", 2)), "groups")
+    assert "bob</div>" in other and "al</div>" in other and "ah-friend" in other
+    assert "Group total" in other
+    assert "ah-toggle" in render_heatmap_html(None, [], None, None, "mine")
 
 
-def test_heatmap_friends_status_states():
-    friends = {"bob": profile([])}
-    loading = render_heatmap_html(None, {}, "friends", "loading")
-    assert "Loading friends" in loading and "bob" not in loading
-    error = render_heatmap_html(None, {}, "friends", "error")
-    assert "ankihelper:retry" in error
-    assert "ah-friend" in render_heatmap_html(None, friends, "friends", "loaded")
-    assert "ankihelper:retry" not in render_heatmap_html(None, {}, "mine", "error")
+def test_group_picker_marks_selection_and_escapes():
+    html = render_heatmap_html(None, [G1, G2], "g2", group(("a", 1)), "groups")
+    assert 'value="g2" selected' in html and 'value="g1" selected' not in html
+    assert "Crew &lt;1&gt; (2)" in html and "Crew <1>" not in html
+    assert "ankihelper:group:" in html
+
+
+def test_manage_groups_button_only_on_groups_view():
+    assert "ankihelper:groups" not in render_heatmap_html(None, [], None, None, "mine")
+    assert "ankihelper:groups" in render_heatmap_html(None, [], None, None, "groups")
+
+
+def test_empty_state_when_no_groups():
+    html = render_heatmap_html(None, [], None, None, "groups")
+    assert "Create or join a group" in html and "Open Groups" in html
+
+
+def test_invite_hint_when_only_user_in_group():
+    html = render_heatmap_html(None, [G1], "g1", group(("me", 4)), "groups")
+    assert "Only you are in this group" in html
+    assert "Group total" not in html and "me</div>" in html
+
+
+def test_heatmap_groups_status_states():
+    loading = render_heatmap_html(None, [], None, None, "groups", "loading")
+    assert "Loading groups" in loading
+    error = render_heatmap_html(None, [], None, None, "groups", "error")
+    assert "Retry" in error
+    loaded = render_heatmap_html(None, [G1], "g1", group(("bob", 1), ("al", 1)), "groups")
+    assert "ah-friend" in loaded

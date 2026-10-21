@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from .models import FriendDay, ProfileReviews
+from .models import ReviewDay, YearReviews
 
 DAY_SECONDS = 86400
 MAX_STUDY_MINUTES = 1440
@@ -43,7 +43,7 @@ def today_stats(col: Any) -> TodayStats:
     return TodayStats(study_date, total, retention, minutes)
 
 
-def year_stats(col: Any, days: int = YEAR_DAYS) -> ProfileReviews:
+def year_stats(col: Any, days: int = YEAR_DAYS) -> YearReviews:
     """Per-day stats for the last `days` Anki days, in the shape friends use.
 
     Days are bucketed by the scheduler rollover, like `today_stats`.
@@ -63,11 +63,11 @@ def year_stats(col: Any, days: int = YEAR_DAYS) -> ProfileReviews:
         cutoff_ms - days * DAY_SECONDS * 1000,
         cutoff_ms,
     )
-    result: list[FriendDay] = []
+    result: list[ReviewDay] = []
     for ago, total, time_ms, review_total, review_passed in rows:
         review_total, review_passed = int(review_total or 0), int(review_passed or 0)
         result.append(
-            FriendDay(
+            ReviewDay(
                 study_date=today - timedelta(days=max(int(ago), 0)),
                 total_reviews=int(total),
                 retention=(
@@ -79,7 +79,7 @@ def year_stats(col: Any, days: int = YEAR_DAYS) -> ProfileReviews:
             )
         )
     result.sort(key=lambda d: d.study_date)
-    return ProfileReviews(
+    return YearReviews(
         username="you",
         start=today - timedelta(days=days - 1),
         end=today,

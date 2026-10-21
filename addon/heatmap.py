@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from html import escape
 from typing import NamedTuple
 
-from .models import ProfileReviews
+from .models import GroupReviews, GroupSummary, YearReviews
 
 
 @dataclass(frozen=True)
@@ -21,7 +21,7 @@ class HeatmapCell:
         return self.total_reviews > 0
 
 
-def build_grid(profile: ProfileReviews) -> list[list[HeatmapCell | None]]:
+def build_grid(profile: YearReviews) -> list[list[HeatmapCell | None]]:
     """Columns are weeks (Monday first), rows are weekdays Mon-Sun.
 
     Cells outside `profile.start..profile.end` are None. Days the server sent
@@ -77,6 +77,8 @@ _STREAK_STEPS = (0, 7, 14, 21, 30)
 _PERCENT_STEPS = (0, 25, 50, 60, 70, 80, 85, 90, 95, 99)
 VIEW_CMD = "ankihelper:view:"
 RETRY_CMD = "ankihelper:retry"
+GROUPS_CMD = "ankihelper:groups"
+GROUP_CMD = "ankihelper:group:"
 _DAY_LETTERS = "MTWTFSS"
 _CELL = 10
 _PITCH = 12
@@ -91,7 +93,7 @@ class HeatmapStats(NamedTuple):
     current_streak: int
 
 
-def legend_for(profile: ProfileReviews) -> list[float]:
+def legend_for(profile: YearReviews) -> list[float]:
     """Level thresholds, scaled by the average over active days (min 20)."""
     active = [d.total_reviews for d in profile.days if d.total_reviews > 0]
     base = max(20, sum(active) / len(active)) if active else 20
@@ -105,7 +107,7 @@ def level_for(count: int, legend: Sequence[float]) -> int:
     return 1 + sum(count >= t for t in legend)
 
 
-def compute_stats(profile: ProfileReviews) -> HeatmapStats:
+def compute_stats(profile: YearReviews) -> HeatmapStats:
     counts = {d.study_date: d.total_reviews for d in profile.days}
     total_days = (profile.end - profile.start).days + 1
     if total_days <= 0:
@@ -291,7 +293,7 @@ def render_stats_html(stats: HeatmapStats) -> str:
     )
 
 
-def _render_profile(name: str, profile: ProfileReviews | None, label: str = "") -> str:
+def _render_profile(name: str, profile: YearReviews | None, label: str = "") -> str:
     title = escape(label or name)
     if profile is None:
         title = f"{escape(name)} (user not found)"
@@ -304,21 +306,72 @@ def _render_profile(name: str, profile: ProfileReviews | None, label: str = "") 
     return f'<div class="ah-friend"><div class="ah-name">{title}</div>{body}</div>'
 
 
-def render_friends_html(friends: dict[str, ProfileReviews | None]) -> str:
-    """HTML block for the deck browser; empty when no friends are configured."""
-    if not friends:
+def render_members_html(members: Mapping[str, YearReviews | None]) -> str:
+    """HTML block of one heatmap per name; empty when there are none."""
+    if not members:
         return ""
-    blocks = [_render_profile(name, profile) for name, profile in friends.items()]
+    blocks = [_render_profile(name, profile) for name, profile in members.items()]
     return f'{_CSS}<div class="ah-friends">{"".join(blocks)}</div>{_JS}'
 
 
-def render_heatmap_html(
-    mine: ProfileReviews | None,
-    friends: Mapping[str, ProfileReviews | None],
-    view: str,
-    friends_status: str = "loaded",
+def _picker(groups: Sequence[GroupSummary], selected: str | None) -> str:
+    options = "".join(
+        f'<option value="{escape(g.id)}"{" selected" if g.id == selected else ""}>'
+        f"{escape(g.name)} ({g.member_count})</option>"
+        for g in groups
+    )
+    return (
+        '<select class="ah-toggle" '
+        f"onchange=\"pycmd('{GROUP_CMD}' + this.value)\">{options}</select>"
+    )
+
+
+def _groups_body(
+    groups: Sequence[GroupSummary],
+    selected: str | None,
+    reviews: GroupReviews | None,
+    status: str,
 ) -> str:
-    """Toggle bar plus either the user's own heatmap or the friends' ones."""
+    if status in ("loading", "idle"):
+        return (
+            '<div class="ah-name">Loading groups...</div>'
+            "<div>The server may be waking up; this can take a couple of minutes.</div>"
+        )
+    if status == "error":
+        return (
+            '<div class="ah-name">Couldn\'t reach the server.</div>'
+            f'<button class="ah-toggle" onclick="pycmd(\'{RETRY_CMD}\')">Retry</button>'
+        )
+    if not groups:
+        return (
+            '<div class="ah-name">Create or join a group</div>'
+            "<div>Groups let you share your review stats with friends.</div>"
+            f'<button class="ah-toggle" onclick="pycmd(\'{GROUPS_CMD}\')">'
+            "Open Groups</button>"
+        )
+    body = f'<div class="ah-name">{_picker(groups, selected)}</div>'
+    if reviews is None:
+        return body
+    if len(reviews.members) <= 1:
+        body += (
+            "<div>Only you are in this group so far. Open Manage groups to copy "
+            "its invite code and allow your friends' usernames.</div>"
+        )
+    else:
+        body += _render_profile("Group total", reviews.total(), label="Group total")
+    members = {m.username: reviews.year_for(m) for m in reviews.members}
+    return body + "".join(_render_profile(n, p) for n, p in members.items())
+
+
+def render_heatmap_html(
+    mine: YearReviews | None,
+    groups: Sequence[GroupSummary],
+    selected: str | None,
+    reviews: GroupReviews | None,
+    view: str,
+    status: str = "loaded",
+) -> str:
+    """Toggle bar plus either the user's own heatmap or the selected group's."""
 
     def button(target: str, text: str) -> str:
         active = " ah-active" if view == target else ""
@@ -327,25 +380,19 @@ def render_heatmap_html(
             f"onclick=\"pycmd('{VIEW_CMD}{target}')\">{text}</button>"
         )
 
-    if view == "friends" and friends_status == "loading":
-        body = (
-            '<div class="ah-name">Loading friends...</div>'
-            "<div>The server may be waking up; this can take a couple of minutes.</div>"
-        )
-    elif view == "friends" and friends_status == "error":
-        body = (
-            '<div class="ah-name">Couldn\'t reach the server.</div>'
-            f'<button class="ah-toggle" onclick="pycmd(\'{RETRY_CMD}\')">Retry</button>'
-        )
-    elif view == "friends" and friends_status == "idle":
-        body = '<div class="ah-name">Loading friends...</div>'
-    elif view == "friends":
-        body = "".join(_render_profile(n, p) for n, p in friends.items())
-        if not body:
-            body = '<div class="ah-name">No friends configured</div>'
+    if view == "groups":
+        body = _groups_body(groups, selected, reviews, status)
     elif mine is not None:
         body = _render_profile(mine.username, mine, label="My stats")
     else:
         body = ""
-    bar = f'<div class="ah-bar">{button("mine", "My stats")}{button("friends", "Friends")}</div>'
+    manage = (
+        f'<button class="ah-toggle" onclick="pycmd(\'{GROUPS_CMD}\')">Manage groups</button>'
+        if view == "groups"
+        else ""
+    )
+    bar = (
+        f'<div class="ah-bar">{button("mine", "My stats")}'
+        f'{button("groups", "Groups")}{manage}</div>'
+    )
     return f'{_CSS}<div class="ah-friends">{bar}{body}</div>{_JS}'
