@@ -6,16 +6,26 @@ from urllib.parse import quote
 
 import httpx
 
-from .errors import ApiError, AuthError, NetworkError, NotConfiguredError, ServerError
+from .errors import (
+    ApiError,
+    AuthError,
+    FeatureUnavailableError,
+    NetworkError,
+    NotConfiguredError,
+    ServerError,
+)
 from .log import get_logger
 from .models import (
     DailyReview,
     Group,
     GroupReviews,
     GroupSummary,
+    HistoryResult,
+    HistoryStatus,
     InviteCode,
     SignupResponse,
     UserResponse,
+    YearReviews,
 )
 from .session import Session, check_response
 from .settings import Settings
@@ -46,6 +56,17 @@ def _parse[T](path: str, build: Callable[[], T]) -> T:
         return build()
     except ValueError as exc:
         raise ServerError(f"Unexpected response from {path}") from exc
+
+
+def _history_error(exc: ApiError) -> Exception:
+    """Map the history endpoints' 4xx errors to user-facing ones."""
+    if exc.status_code == 404:
+        return FeatureUnavailableError("The server does not support history upload yet.")
+    if exc.status_code == 429:
+        return ApiError(429, "Uploaded too many times recently. Try again in an hour.")
+    if exc.status_code == 422:
+        return ApiError(422, f"The server rejected this history: {exc.detail}")
+    return exc
 
 
 class ApiClient:
@@ -145,6 +166,39 @@ class ApiClient:
             )
         except ValueError as exc:
             raise ServerError("Unexpected response from /reviews/daily") from exc
+
+    def get_history_status(self) -> HistoryStatus:
+        path = "/reviews/history/status"
+        try:
+            resp = self.get(path)
+        except ApiError as exc:
+            raise _history_error(exc) from exc
+        return _parse(path, lambda: HistoryStatus.from_dict(resp.json()))
+
+    def upload_history(self, history: YearReviews) -> HistoryResult:
+        """Replace the server's rows for `history.start`..`history.end` (idempotent)."""
+        path = "/reviews/history"
+        days: list[dict[str, Any]] = []
+        for day in history.days:
+            row: dict[str, Any] = {
+                "study_date": day.study_date.isoformat(),
+                "total_reviews": day.total_reviews,
+            }
+            if day.retention is not None:
+                row["retention"] = day.retention
+            if day.study_minutes is not None:
+                row["study_minutes"] = day.study_minutes
+            days.append(row)
+        body = {
+            "start": history.start.isoformat(),
+            "end": history.end.isoformat(),
+            "days": days,
+        }
+        try:
+            resp = self.put(path, json=body)
+        except ApiError as exc:
+            raise _history_error(exc) from exc
+        return _parse(path, lambda: HistoryResult.from_dict(resp.json()))
 
     def get_me(self) -> UserResponse:
         try:

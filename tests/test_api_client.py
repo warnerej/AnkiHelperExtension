@@ -6,11 +6,13 @@ import pytest
 from addon.errors import (
     ApiError,
     AuthError,
+    FeatureUnavailableError,
     NetworkError,
     NotConfiguredError,
     NotLoggedInError,
     ServerError,
 )
+from addon.models import ReviewDay, YearReviews
 from addon.settings import Settings, strip_legacy_credentials
 from addon.stats import TodayStats
 
@@ -620,3 +622,102 @@ def test_delete_account_never_logs_the_password(backend, make_client, caplog):
     with caplog.at_level("DEBUG"):
         make_client().delete_account("pw-secret")
     assert "pw-secret" not in caplog.text
+
+
+HISTORY_PATH = "/reviews/history"
+STATUS_PATH = "/reviews/history/status"
+HISTORY_OK = {
+    "start": "2025-02-01",
+    "end": "2026-01-31",
+    "days_written": 2,
+    "history_synced_at": "2026-01-31T21:04:11+00:00",
+}
+
+
+def year(*days: ReviewDay) -> YearReviews:
+    from datetime import date
+
+    return YearReviews("you", date(2025, 2, 1), date(2026, 1, 31), list(days))
+
+
+def test_upload_history_body_and_parse(backend, make_client):
+    from datetime import date
+
+    logged_in(backend)
+    backend.on("PUT", HISTORY_PATH, (200, HISTORY_OK))
+    result = make_client().upload_history(
+        year(
+            ReviewDay(date(2026, 1, 30), 10, 91.5, 12),
+            ReviewDay(date(2026, 1, 31), 3),
+        )
+    )
+    assert result.days_written == 2
+    assert result.history_synced_at.year == 2026
+    assert backend.body(1) == {
+        "start": "2025-02-01",
+        "end": "2026-01-31",
+        "days": [
+            {
+                "study_date": "2026-01-30",
+                "total_reviews": 10,
+                "retention": 91.5,
+                "study_minutes": 12,
+            },
+            {"study_date": "2026-01-31", "total_reviews": 3},
+        ],
+    }
+    assert backend.calls[1].headers["Authorization"] == "Bearer access1"
+
+
+def test_upload_history_empty_days_is_valid(backend, make_client):
+    logged_in(backend)
+    backend.on("PUT", HISTORY_PATH, (200, {**HISTORY_OK, "days_written": 0}))
+    make_client().upload_history(year())
+    assert backend.body(1)["days"] == []
+    assert backend.body(1)["start"] == "2025-02-01"
+
+
+def test_upload_history_retries_on_5xx(backend, make_client):
+    logged_in(backend)
+    backend.on("PUT", HISTORY_PATH, (502, {"detail": "db"}), (200, HISTORY_OK))
+    make_client().upload_history(year())
+    assert backend.count("PUT", HISTORY_PATH) == 2
+
+
+def test_upload_history_maps_429_422_404(backend, make_client):
+    logged_in(backend)
+    client = make_client()
+    backend.on("PUT", HISTORY_PATH, (429, {"detail": "slow down"}))
+    with pytest.raises(ApiError, match="Try again in an hour") as exc:
+        client.upload_history(year())
+    assert exc.value.status_code == 429
+    backend.on("PUT", HISTORY_PATH, (422, {"detail": "range too long"}))
+    with pytest.raises(ApiError, match="rejected this history: range too long"):
+        client.upload_history(year())
+    backend.on("PUT", HISTORY_PATH, (404, {"detail": "Not Found"}))
+    with pytest.raises(FeatureUnavailableError):
+        client.upload_history(year())
+    assert backend.count("PUT", HISTORY_PATH) == 3  # 4xx is never retried
+
+
+def test_get_history_status(backend, make_client):
+    logged_in(backend)
+    backend.on(
+        "GET", STATUS_PATH, (200, {"history_synced_at": None}), (200, {"history_synced_at": None})
+    )
+    client = make_client()
+    assert client.get_history_status().history_synced_at is None
+    assert backend.calls[1].headers["Authorization"] == "Bearer access1"
+    backend.on("GET", STATUS_PATH, (200, {"history_synced_at": "2026-01-31T21:04:11+00:00"}))
+    assert client.get_history_status().history_synced_at is not None
+
+
+def test_get_history_status_404_and_malformed(backend, make_client):
+    logged_in(backend)
+    client = make_client()
+    backend.on("GET", STATUS_PATH, (404, {"detail": "Not Found"}))
+    with pytest.raises(FeatureUnavailableError):
+        client.get_history_status()
+    backend.on("GET", STATUS_PATH, (200, {"history_synced_at": 5}))
+    with pytest.raises(ServerError):
+        client.get_history_status()

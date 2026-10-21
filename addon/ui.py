@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from aqt import gui_hooks, mw
+from aqt.operations import QueryOp
 from aqt.qt import (
     QAction,
     QDialog,
@@ -22,10 +23,19 @@ from .errors import AnkiHelperError, NotLoggedInError
 from .group_loader import GroupLoader, load_snapshot
 from .groups_dialog import GroupsDialog
 from .heatmap import GROUP_CMD, GROUPS_CMD, RETRY_CMD, VIEW_CMD, render_heatmap_html
+from .history_backfill import HistoryBackfiller
+from .history_logic import (
+    CONFIRM_WORD,
+    has_reviews,
+    manual_confirmation,
+    result_message,
+    today_row,
+    typed_confirmation_ok,
+)
 from .log import get_logger, setup_logging
-from .models import DailyReview, SignupResponse, UserResponse
+from .models import DailyReview, HistoryResult, SignupResponse, UserResponse, YearReviews
 from .settings import USERNAME_RE, Settings, strip_friends, strip_legacy_credentials
-from .stats import TodayStats, today_stats, year_stats
+from .stats import YEAR_DAYS, TodayStats, today_stats, year_stats
 from .token_store import TokenStore
 
 log = get_logger()
@@ -114,6 +124,36 @@ class DeleteAccountDialog(QDialog):
         self.accept()
 
 
+class EmptyUploadDialog(QDialog):
+    """Stronger confirm for uploading an empty year: type the word to proceed."""
+
+    def __init__(self, parent: Any, message: str) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("AnkiHelper: Re-upload review history")
+        self.typed = QLineEdit()
+        form = QFormLayout()
+        form.addRow(f"Type {CONFIRM_WORD} to confirm", self.typed)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self._validate)
+        buttons.rejected.connect(self.reject)
+        layout = QVBoxLayout(self)
+        layout.addWidget(_hint(message))
+        layout.addLayout(form)
+        layout.addWidget(buttons)
+
+    def _validate(self) -> None:
+        if not typed_confirmation_ok(self.typed.text()):
+            showWarning(
+                f"Type {CONFIRM_WORD} to confirm, or cancel.",
+                title="AnkiHelper",
+                parent=self,
+            )
+            return
+        self.accept()
+
+
 def _hint(text: str) -> QLabel:
     label = QLabel(text)
     label.setWordWrap(True)
@@ -157,6 +197,23 @@ class Controller:
             notify=tooltip,
             warn=lambda message: showWarning(message, title="AnkiHelper"),
         )
+        self._logged_in = False
+        self._synced_this_session = False
+        self._reupload_inflight = False
+        self.backfill = HistoryBackfiller(
+            is_logged_in=lambda: self._logged_in,
+            uses_sync=lambda: mw.pm.sync_auth() is not None,
+            synced_this_session=lambda: self._synced_this_session,
+            fetch_status=self.client.get_history_status,
+            read_year=self._read_year,
+            upload=self.client.upload_history,
+            run_in_background=lambda task, done: mw.taskman.run_in_background(
+                task, done
+            ),
+            notify=tooltip,
+            mark_groups_stale=self.groups.mark_stale,
+            set_last_pushed=self._set_last_pushed,
+        )
         self.reload_config()
         self._migrate_legacy_config()
 
@@ -170,6 +227,74 @@ class Controller:
             Path(__file__).parent / "user_files",
             bool(self._config.get("debug_logging")),
         )
+
+    def _read_year(self, days: int, success: Any, failure: Any) -> None:
+        """Read the last `days` days' stats through QueryOp, which owns the collection."""
+        assert mw is not None
+        QueryOp(
+            parent=mw, op=lambda col: year_stats(col, days), success=success
+        ).failure(failure).run_in_background()
+
+    def reupload_history(self) -> None:
+        """Menu action: replace the server's last year with this collection's data."""
+        if not self._logged_in:
+            showInfo(str(NotLoggedInError()), title="AnkiHelper")
+            return
+        if self._reupload_inflight:
+            return
+        self._reupload_inflight = True
+        self._read_year(
+            YEAR_DAYS, self._on_year_for_reupload, self._on_reupload_read_failed
+        )
+
+    def _on_reupload_read_failed(self, exc: Exception) -> None:
+        self._reupload_inflight = False
+        log.error("reading the collection for re-upload failed", exc_info=exc)
+        showWarning(
+            "Could not read your review history. See user_files/ankihelper.log.",
+            title="AnkiHelper",
+        )
+
+    def _on_year_for_reupload(self, history: YearReviews) -> None:
+        assert mw is not None
+        message = manual_confirmation(history, self._synced_this_session)
+        if has_reviews(history):
+            confirmed = askUser(message, title="AnkiHelper")
+        else:
+            confirmed = bool(EmptyUploadDialog(mw, message).exec())
+        if not confirmed:
+            self._reupload_inflight = False
+            return
+        tooltip("AnkiHelper: uploading review history...")
+        mw.taskman.run_in_background(
+            lambda: self.client.upload_history(history),
+            lambda future: self._on_reupload_result(future, history),
+        )
+
+    def _on_reupload_result(
+        self, future: Future[HistoryResult], history: YearReviews
+    ) -> None:
+        self._reupload_inflight = False
+        try:
+            result = future.result()
+        except AnkiHelperError as exc:
+            log.info("history re-upload failed: %s", exc)
+            showWarning(str(exc), title="AnkiHelper")
+            return
+        except Exception:
+            _unexpected("history re-upload")
+            return
+        log.info("history re-upload wrote %d days", result.days_written)
+        tooltip(result_message(result))
+        self.groups.mark_stale()
+        if self.view == "groups":
+            self.groups.ensure()
+        row = today_row(history)
+        if row is not None:
+            self._set_last_pushed(row)
+
+    def _set_last_pushed(self, stats: TodayStats) -> None:
+        self._last_pushed = stats
 
     def _save_selected_group(self, group_id: str) -> None:
         assert mw is not None
@@ -212,6 +337,7 @@ class Controller:
         try:
             future.result()
         except NotLoggedInError as exc:
+            self._logged_in = False
             log.info("no session restored: %s", exc)
             if "expired" in str(exc) and askUser(
                 f"{exc}\n\nLog in now?", title="AnkiHelper"
@@ -219,8 +345,12 @@ class Controller:
                 self.log_in()
         except AnkiHelperError as exc:
             log.info("session restore failed: %s", exc)  # e.g. offline; retried on use
+            self._logged_in = True  # a stored session exists; backfill retries after sync
         except Exception:
             log.exception("unexpected error restoring session")
+        else:
+            self._logged_in = True
+            self.backfill.maybe_run()
 
     def open_groups(self) -> None:
         """Show the (single, non-modal) Groups dialog."""
@@ -290,7 +420,9 @@ class Controller:
             self.push_today()
 
     def on_sync_finished(self) -> None:
+        self._synced_this_session = True
         self.push_today()
+        self.backfill.maybe_run(after_sync=True)
 
     def _on_push_result(
         self,
@@ -410,7 +542,9 @@ class Controller:
             _unexpected("login")
             return
         tooltip("AnkiHelper: logged in")
+        self._logged_in = True
         self.push_today()
+        self.backfill.maybe_run()
 
     def sign_up(self) -> None:
         assert mw is not None
@@ -442,10 +576,14 @@ class Controller:
             )
         else:
             tooltip("AnkiHelper: account created and logged in")
+            self._logged_in = True
             self.push_today()
+            self.backfill.maybe_run()
 
     def log_out(self) -> None:
         assert mw is not None
+        self._logged_in = False
+        self.backfill.reset()
         mw.taskman.run_in_background(
             self.client.logout, lambda _future: tooltip("AnkiHelper: logged out")
         )
@@ -486,6 +624,8 @@ class Controller:
         if self._groups_dialog is not None:
             self._groups_dialog.close()
         self._last_pushed = None
+        self._logged_in = False
+        self.backfill.reset()
         self.groups.reset()
         tooltip("AnkiHelper: account deleted")
 
@@ -498,6 +638,7 @@ def setup() -> Controller:
         ("Log in...", controller.log_in),
         ("Sign up...", controller.sign_up),
         ("Log out", controller.log_out),
+        ("Re-upload review history...", controller.reupload_history),
         ("Delete account...", controller.delete_account),
         ("Groups...", controller.open_groups),
         None,

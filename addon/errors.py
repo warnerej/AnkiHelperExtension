@@ -32,3 +32,7 @@ class ApiError(AnkiHelperError):
         super().__init__(f"{status_code}: {detail}")
         self.status_code = status_code
         self.detail = detail
+
+
+class FeatureUnavailableError(AnkiHelperError):
+    """The backend predates the requested feature (404 on its endpoint)."""

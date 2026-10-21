@@ -117,6 +117,38 @@ class DailyReview:
 
 
 @dataclass(frozen=True)
+class HistoryResult:
+    start: date
+    end: date
+    days_written: int
+    history_synced_at: datetime
+
+    @classmethod
+    def from_dict(cls, data: Any) -> Self:
+        d = _obj(data, "HistoryResult")
+        return cls(
+            start=_get(d, "HistoryResult", "start", _date),
+            end=_get(d, "HistoryResult", "end", _date),
+            days_written=_get(d, "HistoryResult", "days_written", _int),
+            history_synced_at=_get(d, "HistoryResult", "history_synced_at", _datetime),
+        )
+
+
+@dataclass(frozen=True)
+class HistoryStatus:
+    """`history_synced_at` is None until the first history upload for the account."""
+
+    history_synced_at: datetime | None = None
+
+    @classmethod
+    def from_dict(cls, data: Any) -> Self:
+        d = _obj(data, "HistoryStatus")
+        return cls(
+            history_synced_at=_get(d, "HistoryStatus", "history_synced_at", _datetime, None)
+        )
+
+
+@dataclass(frozen=True)
 class SignupResponse:
     user: UserResponse
     tokens: TokenResponse | None = None

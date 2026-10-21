@@ -3,7 +3,15 @@ from datetime import date, datetime
 
 import pytest
 
-from addon.models import DailyReview, ReviewDay, SignupResponse, TokenResponse, UserResponse
+from addon.models import (
+    DailyReview,
+    HistoryResult,
+    HistoryStatus,
+    ReviewDay,
+    SignupResponse,
+    TokenResponse,
+    UserResponse,
+)
 
 TOKENS = {"access_token": "a", "refresh_token": "r", "expires_in": 60}
 DAY = {"study_date": "2026-01-02", "total_reviews": 5, "retention": 0.9, "study_minutes": 12}
@@ -156,3 +164,33 @@ def test_group_reviews_year_for_and_total():
     assert total.username == "Group total"
     assert total.days == [ReviewDay(d1, 12, None, 14.0), ReviewDay(d2, 1, None, None)]
     assert GroupReviews("g", d1, d2).total().days == []
+
+
+class TestHistory:
+    def test_result(self):
+        r = HistoryResult.from_dict(
+            {
+                "start": "2025-02-01",
+                "end": "2026-01-31",
+                "days_written": 213,
+                "history_synced_at": "2026-01-31T21:04:11+00:00",
+            }
+        )
+        assert (r.start, r.end, r.days_written) == (date(2025, 2, 1), date(2026, 1, 31), 213)
+        assert r.history_synced_at == datetime.fromisoformat("2026-01-31T21:04:11+00:00")
+
+    def test_result_missing_field(self):
+        with pytest.raises(ValueError, match="days_written"):
+            HistoryResult.from_dict(
+                {"start": "2025-02-01", "end": "2026-01-31", "history_synced_at": "2026-01-31T00:00:00Z"}
+            )
+
+    def test_status_null_and_set(self):
+        assert HistoryStatus.from_dict({"history_synced_at": None}).history_synced_at is None
+        assert HistoryStatus.from_dict({}).history_synced_at is None
+        s = HistoryStatus.from_dict({"history_synced_at": "2026-01-31T21:04:11+00:00"})
+        assert s.history_synced_at is not None
+
+    def test_status_bad_type(self):
+        with pytest.raises(ValueError, match="history_synced_at"):
+            HistoryStatus.from_dict({"history_synced_at": 1})
