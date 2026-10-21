@@ -19,6 +19,8 @@ All bodies and responses are JSON. Every endpoint except `/health`, `/auth/signu
 | `GET /reviews/daily` | yes | query: `start`, `end` (ISO dates, optional), `limit` (1-365, default 90) | list of rows, newest first |
 | `GET /reviews/daily/{study_date}` | yes | | one row, or 404 |
 | `GET /profiles/{username}/reviews` (deprecated; the add-on no longer calls it) | yes | | `{username, start, end, days}` with that user's rows for the past `days` days (query param, 1-365, default 30; the add-on sends 365; newest first, same fields as a row minus `updated_at`); 404 if no such username |
+| `PUT /reviews/history` | yes | `{start, end, days: [{study_date, total_reviews, retention?, study_minutes?}]}` (ISO dates; `days` may be empty) | `{start, end, days_written, history_synced_at}`. **Replaces** the user's rows for `start`..`end`, so it is idempotent; sets `history_synced_at`. 422 for a bad range or body, 429 after too many uploads per hour (limit 5), 404 on a backend without the feature |
+| `GET /reviews/history/status` | yes | | `{history_synced_at: ISO datetime \| null}`; null until the first history upload |
 | `POST /groups` | yes | `{name}` | 201 group incl. `invite_code` (409 at 20 owned groups) |
 | `GET /groups` | yes | | `[{id, name, role, member_count}]` |
 | `GET /groups/{id}` | yes | | `{id, name, owner, members: [{username, role, joined_at}]}`; the owner also gets `invite_code` and `allowed`; 404 for non-members |
@@ -33,6 +35,14 @@ All bodies and responses are JSON. Every endpoint except `/health`, `/auth/signu
 | `GET /groups/{id}/reviews` | member | query: `days` (1-365; the add-on sends 365) | `{group_id, start, end, members: [{username, days}]}`; every joined member is listed, `days` may be empty |
 
 A review row is `{study_date: "YYYY-MM-DD", total_reviews: int, retention: float | null, study_minutes: float | null, updated_at: ISO datetime}`. `retention` is a percent (0-100) and `study_minutes` is the minutes studied that day (0-1440). Both are optional on PUT; if omitted, any stored value is kept (null if never sent). Send them as running values for the day, like `total_reviews`.
+
+## Review history backfill
+
+The add-on only pushes the current day, so it uploads history through `PUT /reviews/history`, which replaces a whole date range:
+
+- **Automatic, once per account:** after login, signup or session restore, when `GET /reviews/history/status` says `history_synced_at` is null, it uploads the last 365 days (`stats.year_stats`). If the profile uses AnkiWeb sync it waits for the first sync of the session so phone reviews are included. It never uploads a year with zero reviews (that would wipe the server's history); it stays pending and retries next session. Errors are logged, never shown.
+- **Catch-up after each sync:** once the server has history, each sync re-uploads the last 7 days (silent, skipped when empty, at most one history upload per 15 minutes).
+- **Manual:** Tools > AnkiHelper > Re-upload review history... uploads the last 365 days after a confirmation (typing `upload` when the year is empty). Errors are shown, including the 429 "try again in an hour".
 
 ## Auth flow for the client
 

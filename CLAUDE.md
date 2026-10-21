@@ -2,7 +2,7 @@
 
 Anki add-on (client) for AnkiHelper. It reads study stats from the local Anki collection, pushes them to the AnkiHelper FastAPI backend (Supabase-backed), and pulls stats back to display progress for the user and others. Endpoint reference: `API_GUIDE.md`; overview and setup: `README.md`.
 
-**Status:** backend has auth (`/auth/signup|login|refresh|me|logout`, `DELETE /auth/me`), daily reviews (`PUT/GET /reviews/daily`, `GET /reviews/daily/{date}`) and groups (`list_groups`, `join_group`, `get_group_reviews`, ... on `ApiClient`). The add-on implements login/logout dialogs, signup, Delete account (confirm by typing the account email plus the password; never retried), stored-refresh-token session restore, daily push, the Groups screen (Tools > AnkiHelper > Groups...) and the Groups tab on the deck browser (picker remembered in `selected_group`, one `get_group_reviews` call per group). The old per-user friends fetch and `friends` config are gone.
+**Status:** backend has auth (`/auth/signup|login|refresh|me|logout`, `DELETE /auth/me`), daily reviews (`PUT/GET /reviews/daily`, `GET /reviews/daily/{date}`) and groups (`list_groups`, `join_group`, `get_group_reviews`, ... on `ApiClient`). The add-on implements login/logout dialogs, signup, Delete account (confirm by typing the account email plus the password; never retried), stored-refresh-token session restore, daily push, the Groups screen (Tools > AnkiHelper > Groups...) and the Groups tab on the deck browser (picker remembered in `selected_group`, one `get_group_reviews` call per group). It also uploads review history: an automatic once-per-account 365-day backfill (guarded: waits for the first AnkiWeb sync, never uploads an empty year), a 7-day catch-up after each sync, and a manual Tools > AnkiHelper > Re-upload review history... (`PUT /reviews/history`, `GET /reviews/history/status`). The old per-user friends fetch and `friends` config are gone.
 
 ## Environment
 - `uv` project. Python is pinned to **3.13** because Anki bundles its own interpreter (not 3.14). Verify against the installed Anki (Help > About) before changing.
@@ -14,6 +14,7 @@ Anki add-on (client) for AnkiHelper. It reads study stats from the local Anki co
 - `addon/` is what gets zipped to `.ankiaddon`. Only `ui.py` imports `aqt`; everything else is plain Python so tests run without Anki.
   - `__init__.py` (entry; sets up `vendor/` path, calls `ui.setup()` inside Anki), `ui.py` (`Controller`: menus, hooks, daily push, signup)
   - `groups_logic.py` (pure Groups-screen decisions: validation, owner/member controls, messages) + `groups_dialog.py` (Qt dialog, opened by `Controller.open_groups`)
+  - `history_logic.py` (pure history-upload decisions) + `history_backfill.py` (backfill/catch-up sequencing, Anki bits injected),
   - `delete_logic.py` (pure Delete-account checks), `group_loader.py` + `group_state.py` (groups fetch/retry state machine, with Anki bits injected; pure decisions)
   - `api_client.py` (endpoints, retries), `session.py` (tokens, login/refresh/logout), `token_store.py` (refresh token file in `user_files/`), `settings.py`, `models.py`, `errors.py`, `log.py`
   - `stats.py` (revlog -> stats), `heatmap.py` (HTML/SVG rendering)
@@ -31,10 +32,11 @@ Anki add-on (client) for AnkiHelper. It reads study stats from the local Anki co
 - Never embed or log passwords/tokens. Never use a Supabase service-role key. The add-on talks only to the AnkiHelper API, not Supabase directly.
 - Network calls run off the main thread (`mw.taskman.run_in_background`); never block the Qt UI.
 - Read the collection through Anki's APIs; never write to the collection DB directly.
+- `PUT /reviews/history` replaces its date range server-side: never upload a range from a collection that has not synced or has no reviews, except from the manual flow behind its explicit warning.
 - Sync must be idempotent: each push is an upsert of the day's running total, so re-sending is safe.
 - Tests use a fake HTTP transport (`httpx.MockTransport`) and temp `Collection` fixtures; no network.
 
 ## Decisions
-- Sent: one running-total row per Anki day (`PUT /reviews/daily`, upsert keyed on user + `study_date`; the client owns the date). Received: the selected group's past year for every member (`GET /groups/{id}/reviews`).
+- Sent: past days via `PUT /reviews/history` (365-day backfill, 7-day catch-up); one running-total row per Anki day (`PUT /reviews/daily`, upsert keyed on user + `study_date`; the client owns the date). Received: the selected group's past year for every member (`GET /groups/{id}/reviews`).
 - Ids: no Anki ids are sent; the server key is `(user, study_date)`. Nothing is deleted server-side.
 - Not built: card/note sync, external services.

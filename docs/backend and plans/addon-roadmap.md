@@ -32,6 +32,13 @@ Read `CLAUDE.md`, `README.md` and `API_GUIDE.md` first. Commands: `uv sync`, `uv
 | 3. Group heatmaps | **Done** (uncommitted; 162 tests, ruff and pyright clean; not exercised in a live Anki yet) |
 | 4. Delete account | **Done** (uncommitted; 173 tests, ruff and pyright clean; dialog not exercised in a live Anki yet) |
 | 5. Release prep | **Next** |
+| Backfill 1. History client | **Done** (uncommitted; ruff and pyright clean) |
+| Backfill 2. Pure logic (`history_logic.py`) | **Done** (uncommitted) |
+| Backfill 3. Automatic backfill (`history_backfill.py`, wired in `ui.py`) | **Done** (uncommitted; Qt wiring not run in a live Anki) |
+| Backfill 4. Manual re-upload menu item | **Done** (uncommitted; not run in a live Anki) |
+| Backfill 5. Post-sync 7-day catch-up | **Done** (uncommitted; approved by user; only runs once the server already has history) |
+| Backfill 6. Docs | **Done** (`API_GUIDE.md`, `README.md`, `CLAUDE.md`) |
+| Backfill smoke test in a real Anki | **Pending** (see checklist below; 223 tests pass) |
 
 Nothing from Tasks 1-3 is committed yet; the working tree holds all of it (tests: 162, ruff and pyright clean). None of the Qt code (`groups_dialog.py`, `ui.py`) has been exercised in a live Anki, so a manual smoke test is still owed.
 
@@ -145,3 +152,13 @@ Keep the decision logic (what to show for owners versus members, input validatio
 - Check that packaging (`scripts/package.sh`) produces a working `.ankiaddon`, with only pure-Python packages in `vendor/` and the example config (no local `user_files/`).
 - Update the README: screenshots of the Groups tab, cross-platform install steps, and how groups and invite codes work.
 - Draft an AnkiWeb listing description: what it does, that an account is required, what data is shared and with whom, and a link to the privacy policy (a placeholder until the website exists).
+
+### Backfill smoke test (pending; record results here)
+
+- [ ] Fresh account with existing review history: backfill runs after sync, tooltip appears, group heatmap fills in.
+- [ ] Log in on a second profile with an empty collection: backfill is skipped (log shows "no reviews in the last year").
+- [ ] Manual re-upload with reviews: confirmation shows (with the sync note if not yet synced), upload succeeds, tooltip appears.
+- [ ] Manual re-upload with no reviews: strong warning and the type-`upload` dialog.
+- [ ] Reviews done on a phone, then synced: they appear after the catch-up.
+- [ ] Log out and log in as another account in one session: that account is backfilled too.
+- [ ] Backend without the endpoints (404): nothing shown from the automatic path; manual shows a message.

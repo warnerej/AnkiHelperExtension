@@ -28,6 +28,8 @@ flowchart LR
 
 **Daily push.** `stats.today_stats` reads the `revlog` table through Anki's collection API and computes review count, true retention (share of review-type answers that were not "Again") and study minutes. The study day follows Anki's "next day starts at" rollover (`col.sched.day_cutoff`) rather than midnight, and is dated from noon to avoid DST errors. `PUT /reviews/daily` sends the running total for the day, so it is an idempotent upsert and safe to repeat. Pushes fire after answering cards (throttled to once per 5 minutes), after a sync, when the profile closes, or manually from the Tools menu.
 
+**Review history.** The daily push only covers today, so the add-on also uploads past days with `PUT /reviews/history` (which replaces the date range). It uploads your past year automatically the first time (after the first AnkiWeb sync of the session, never from a collection with no reviews), and after each sync catches up the last week so reviews done on your phone show up. "Re-upload review history..." in the Tools menu redoes the year on demand. The decisions are in `history_logic.py` and the sequencing in `history_backfill.py` (both tested without Anki).
+
 **Authentication.** Log in or sign up from Tools > AnkiHelper. The password is sent once and never stored; the access token stays in memory and only the refresh token is saved, atomically, to `user_files/session.json` (which survives add-on updates). On startup the session is restored from that token. Tokens are refreshed shortly before they expire. On a 401 the client refreshes once and retries once; if the refresh is rejected the file is cleared and the user is asked to log in again. Log out calls `POST /auth/logout` and deletes the file. Refresh tokens rotate and are single use, so refreshes are single-flight: when several threads hit a 401 together, only one refresh is sent and the rest reuse its result.
 
 **Groups screen.** Tools > AnkiHelper > Groups... (or "Manage groups" on the Groups tab) opens a non-modal dialog. It lists your groups (name, role, member count) and lets you create a group or join one with an invite code (after a confirmation that joining shares your last year of stats). Members can see the member list and leave; owners also get the invite code (copy/regenerate), the allowed-username list (removing a name also removes that member), rename, transfer ownership and delete (type the group name to confirm). The decisions live in `groups_logic.py` (tested); `groups_dialog.py` is the thin Qt layer and all calls run off the main thread.
@@ -74,6 +76,7 @@ flowchart LR
 - **Delete account...**: shows what is lost, asks you to type your account email (looked up with `GET /auth/me`) and your password, then calls `DELETE /auth/me`. A wrong password keeps the account. On success the stored token is deleted and the Groups tab is reset.
 - **Test connection**: calls `GET /auth/me` with the current session.
 - **Push today's reviews**: `PUT /reviews/daily` (also runs automatically).
+- **Re-upload review history...**: replaces the last year on the server with this computer's data, after a confirmation (typing `upload` if there are no reviews in the year). Errors are shown.
 - **Groups...**: opens the Groups screen.
 - **Refresh groups**: re-fetches the group list and the selected group's reviews.
 
@@ -86,6 +89,7 @@ flowchart LR
 | `DELETE /auth/me` | Delete account (password in body, never retried) |
 | `GET /auth/me` | Test connection |
 | `PUT /reviews/daily` | Push today's running totals |
+| `PUT /reviews/history`, `GET /reviews/history/status` | Past-year backfill, weekly catch-up and manual re-upload |
 | `GET /groups`, `GET /groups/{id}/reviews` | Group list and the selected group's past year |
 | `/groups/...` (create, join, leave, allow, ...) | Groups screen |
 
@@ -93,7 +97,7 @@ flowchart LR
 
 ```sh
 uv sync
-uv run pytest        # 123 tests
+uv run pytest        # 223 tests
 uv run ruff check .
 uv run pyright
 scripts/package.sh   # builds dist/ankihelper.ankiaddon
@@ -119,6 +123,8 @@ addon/
   group_state.py     pure load/retry decisions used by the loader
   groups_logic.py    pure Groups-screen decisions
   groups_dialog.py   Groups screen (Qt)
+  history_logic.py   pure history-upload decisions and messages
+  history_backfill.py  automatic backfill and post-sync catch-up sequencing (Anki bits injected)
   models.py          response dataclasses (`from_dict` parsing)
   settings.py        validated config
   errors.py          exception hierarchy
