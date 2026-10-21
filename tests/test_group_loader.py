@@ -249,3 +249,23 @@ def test_unexpected_exception_is_reported():
     h.finish(exc=RuntimeError("boom"))
     assert h.warnings == [UNEXPECTED_ERROR]
     assert h.loader.status == gs.ERROR
+
+
+def test_reset_clears_state_and_ignores_a_fetch_in_flight():
+    h = Harness(remembered="g1")
+    h.loader.ensure()
+    task, _done = h.jobs[0]
+    h.finish(task())
+    h.loader.mark_stale()
+    h.loader.ensure()  # second fetch now in flight
+    changes = h.changes
+    h.loader.reset()
+    assert h.loader.groups == [] and h.loader.selected is None
+    assert h.loader.reviews is None and h.loader.status == gs.IDLE
+    assert h.saved[-1] == ""
+    assert h.changes == changes + 1
+    h.finish(snap())  # late result from before the reset
+    assert h.loader.groups == [] and h.loader.status == gs.IDLE
+    assert h.changes == changes + 1
+    h.loader.ensure()  # starts a fresh fetch
+    assert len(h.jobs) == 1

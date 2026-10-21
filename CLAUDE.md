@@ -2,7 +2,7 @@
 
 Anki add-on (client) for AnkiHelper. It reads study stats from the local Anki collection, pushes them to the AnkiHelper FastAPI backend (Supabase-backed), and pulls stats back to display progress for the user and others. Endpoint reference: `API_GUIDE.md`; overview and setup: `README.md`.
 
-**Status:** backend has auth (`/auth/signup|login|refresh|me|logout`), daily reviews (`PUT/GET /reviews/daily`, `GET /reviews/daily/{date}`) and groups (`list_groups`, `join_group`, `get_group_reviews`, ... on `ApiClient`). The add-on implements login/logout dialogs, signup, stored-refresh-token session restore, daily push, the Groups screen (Tools > AnkiHelper > Groups...) and the Groups tab on the deck browser (picker remembered in `selected_group`, one `get_group_reviews` call per group). The old per-user friends fetch and `friends` config are gone.
+**Status:** backend has auth (`/auth/signup|login|refresh|me|logout`, `DELETE /auth/me`), daily reviews (`PUT/GET /reviews/daily`, `GET /reviews/daily/{date}`) and groups (`list_groups`, `join_group`, `get_group_reviews`, ... on `ApiClient`). The add-on implements login/logout dialogs, signup, Delete account (confirm by typing the account email plus the password; never retried), stored-refresh-token session restore, daily push, the Groups screen (Tools > AnkiHelper > Groups...) and the Groups tab on the deck browser (picker remembered in `selected_group`, one `get_group_reviews` call per group). The old per-user friends fetch and `friends` config are gone.
 
 ## Environment
 - `uv` project. Python is pinned to **3.13** because Anki bundles its own interpreter (not 3.14). Verify against the installed Anki (Help > About) before changing.
@@ -14,7 +14,7 @@ Anki add-on (client) for AnkiHelper. It reads study stats from the local Anki co
 - `addon/` is what gets zipped to `.ankiaddon`. Only `ui.py` imports `aqt`; everything else is plain Python so tests run without Anki.
   - `__init__.py` (entry; sets up `vendor/` path, calls `ui.setup()` inside Anki), `ui.py` (`Controller`: menus, hooks, daily push, signup)
   - `groups_logic.py` (pure Groups-screen decisions: validation, owner/member controls, messages) + `groups_dialog.py` (Qt dialog, opened by `Controller.open_groups`)
-  - `group_loader.py` + `group_state.py` (groups fetch/retry state machine, with Anki bits injected; pure decisions)
+  - `delete_logic.py` (pure Delete-account checks), `group_loader.py` + `group_state.py` (groups fetch/retry state machine, with Anki bits injected; pure decisions)
   - `api_client.py` (endpoints, retries), `session.py` (tokens, login/refresh/logout), `token_store.py` (refresh token file in `user_files/`), `settings.py`, `models.py`, `errors.py`, `log.py`
   - `stats.py` (revlog -> stats), `heatmap.py` (HTML/SVG rendering)
   - `config.example.json`, `config.md`, `manifest.json`, `vendor/` (git-ignored, built by packaging)

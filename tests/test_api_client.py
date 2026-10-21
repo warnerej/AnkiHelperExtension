@@ -562,3 +562,61 @@ def test_malformed_group_body_is_server_error(backend, make_client):
     backend.on("GET", "/groups", (200, {"oops": 1}))
     with pytest.raises(ServerError):
         make_client().list_groups()
+
+
+def test_delete_account_sends_password_and_clears_local_session(
+    backend, make_client, store
+):
+    backend.on("POST", "/auth/login", (200, tokens(1)))
+    backend.on("DELETE", "/auth/me", (204, None))
+    client = make_client()
+    client.delete_account("pw-secret")
+    call = backend.calls[-1]
+    assert call.method == "DELETE" and call.url.path == "/auth/me"
+    assert call.headers["Authorization"] == "Bearer access1"
+    assert backend.body(len(backend.calls) - 1) == {"password": "pw-secret"}
+    assert backend.count("POST", "/auth/logout") == 0
+    assert store.load("http://localhost:8000") is None
+    with pytest.raises(NotLoggedInError):
+        client.get_me()
+
+
+def test_delete_account_wrong_password_keeps_session(backend, make_client, store):
+    backend.on("POST", "/auth/login", (200, tokens(1)))
+    backend.on("DELETE", "/auth/me", (403, {"detail": "Invalid password"}))
+    with pytest.raises(ApiError, match="Wrong password") as info:
+        make_client().delete_account("bad-pw")
+    assert info.value.status_code == 403
+    assert "bad-pw" not in str(info.value)
+    assert store.load("http://localhost:8000") == "refresh1"
+
+
+@pytest.mark.parametrize(
+    "failure", [(502, {}), httpx.ConnectError("down")], ids=["5xx", "network"]
+)
+def test_delete_account_is_attempted_once(backend, make_client, store, failure):
+    backend.on("POST", "/auth/login", (200, tokens(1)))
+    backend.on("DELETE", "/auth/me", failure)
+    with pytest.raises((ServerError, NetworkError)):
+        make_client().delete_account("pw-secret")
+    assert backend.count("DELETE", "/auth/me") == 1
+    assert make_client.sleeps == []
+    assert store.load("http://localhost:8000") == "refresh1"
+
+
+def test_delete_account_refreshes_after_401(backend, make_client, store):
+    backend.on("POST", "/auth/login", (200, tokens(1)))
+    backend.on("POST", "/auth/refresh", (200, tokens(2)))
+    backend.on("DELETE", "/auth/me", (401, {"detail": "expired"}), (204, None))
+    make_client().delete_account("pw-secret")
+    assert backend.count("DELETE", "/auth/me") == 2
+    assert backend.calls[-1].headers["Authorization"] == "Bearer access2"
+    assert store.load("http://localhost:8000") is None
+
+
+def test_delete_account_never_logs_the_password(backend, make_client, caplog):
+    backend.on("POST", "/auth/login", (200, tokens(1)))
+    backend.on("DELETE", "/auth/me", (204, None))
+    with caplog.at_level("DEBUG"):
+        make_client().delete_account("pw-secret")
+    assert "pw-secret" not in caplog.text

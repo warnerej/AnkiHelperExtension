@@ -30,12 +30,16 @@ Read `CLAUDE.md`, `README.md` and `API_GUIDE.md` first. Commands: `uv sync`, `uv
 | 1. Groups API client | **Done** (uncommitted at time of writing; 152 tests, ruff and pyright clean) |
 | 2. Groups screen | **Done** (uncommitted; 166 tests, ruff and pyright clean; dialog not exercised in a live Anki yet) |
 | 3. Group heatmaps | **Done** (uncommitted; 162 tests, ruff and pyright clean; not exercised in a live Anki yet) |
-| 4. Delete account | **Next** (see "Before starting Task 4" below) |
-| 5. Release prep | Not started |
+| 4. Delete account | **Done** (uncommitted; 173 tests, ruff and pyright clean; dialog not exercised in a live Anki yet) |
+| 5. Release prep | **Next** |
 
 Nothing from Tasks 1-3 is committed yet; the working tree holds all of it (tests: 162, ruff and pyright clean). None of the Qt code (`groups_dialog.py`, `ui.py`) has been exercised in a live Anki, so a manual smoke test is still owed.
 
-### Before starting Task 4
+### Task 4 outcome
+
+`ApiClient.delete_account(password)` sends `DELETE /auth/me {password}` through `request(..., retries=0)`; `request` now takes a keyword-only `retries` override (`None` = per-method default). 403 becomes `ApiError(403, "Wrong password.")`. On success `Session.account_deleted()` clears memory and the token file without calling `/auth/logout`. Decision: the confirmation text is the account **email**, fetched via `get_me()` when the menu item is used (no backend change needed). Pure checks are in `delete_logic.py`; `DeleteAccountDialog` and `Controller.delete_account/_on_delete_result` are in `ui.py`. On success the Groups dialog is closed and `GroupLoader.reset()` clears state (a generation counter makes a fetch already in flight get ignored) and the stored `selected_group`.
+
+### Before starting Task 4 (kept for reference)
 
 Read the outcomes below, then:
 

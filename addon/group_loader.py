@@ -79,6 +79,7 @@ class GroupLoader:
         self._inflight = False
         self._requested: str | None = None
         self._last_fetch = 0.0
+        self._generation = 0
 
     def ensure(self) -> None:
         """Load groups if this session has none yet (or they are stale)."""
@@ -110,6 +111,20 @@ class GroupLoader:
         """Groups changed elsewhere (e.g. the Groups dialog): reload on next ensure()."""
         self._last_fetch = float("-inf")
 
+    def reset(self) -> None:
+        """Forget everything (e.g. the account was deleted); ignore any fetch in flight."""
+        self._generation += 1
+        self.groups = []
+        self.selected = None
+        self.reviews = None
+        self.status = gs.IDLE
+        self.attempts = 0
+        self._inflight = False
+        self._requested = None
+        self._last_fetch = 0.0
+        self._save_selected("")
+        self._on_change()
+
     def select(self, group_id: str) -> None:
         """Switch to another group (from the picker) and load its reviews."""
         if group_id == self.selected or not any(g.id == group_id for g in self.groups):
@@ -134,11 +149,17 @@ class GroupLoader:
         self._requested = self.selected
         wanted = self._requested
         self._last_fetch = self._clock()
+        generation = self._generation
         self._run_in_background(
-            lambda: self._fetch(wanted), lambda future: self._on_result(future, manual)
+            lambda: self._fetch(wanted),
+            lambda future: self._on_result(future, manual, generation),
         )
 
-    def _on_result(self, future: Future[GroupsSnapshot], manual: bool) -> None:
+    def _on_result(
+        self, future: Future[GroupsSnapshot], manual: bool, generation: int
+    ) -> None:
+        if generation != self._generation:
+            return  # reset() ran while this loaded
         self._inflight = False
         try:
             result = future.result()

@@ -135,6 +135,13 @@ class Session:
             self._clear()
             self._store_file.clear()
 
+    def account_deleted(self) -> None:
+        """The account is gone server-side: drop local tokens without calling logout."""
+        with self._lock:
+            self._clear()
+            self._store_file.clear()
+        log.info("account deleted")
+
     def _clear(self) -> None:
         self._access = None
         self._refresh = None

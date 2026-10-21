@@ -90,9 +90,13 @@ class ApiClient:
             self._session = Session(self._http, self._token_store, settings.base_url)
         return self._session
 
-    def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+    def request(
+        self, method: str, path: str, *, retries: int | None = None, **kwargs: Any
+    ) -> httpx.Response:
+        """Send a request. `retries` overrides the per-method default (0 = try once)."""
         method = method.upper()
-        retries = GET_RETRIES if method in ("GET", "PUT", "DELETE") else 0
+        if retries is None:
+            retries = GET_RETRIES if method in ("GET", "PUT", "DELETE") else 0
         for attempt in range(retries + 1):
             try:
                 return self._request_once(method, path, **kwargs)
@@ -232,6 +236,21 @@ class ApiClient:
             self._token_store.clear()
             return
         session.logout()
+
+    def delete_account(self, password: str) -> None:
+        """Permanently delete the account, then drop the local session.
+
+        Irreversible and carries the password, so it is never retried.
+        """
+        try:
+            self.request(
+                "DELETE", "/auth/me", json={"password": password}, retries=0
+            )
+        except ApiError as exc:
+            if exc.status_code == 403:
+                raise ApiError(403, "Wrong password.") from None
+            raise
+        self._ensure_session().account_deleted()
 
     def close(self) -> None:
         """Release the HTTP client. The stored session is kept for the next start."""

@@ -17,6 +17,7 @@ from aqt.qt import (
 from aqt.utils import askUser, showInfo, showWarning, tooltip
 
 from .api_client import ApiClient
+from .delete_logic import DELETE_WARNING, validate_delete
 from .errors import AnkiHelperError, NotLoggedInError
 from .group_loader import GroupLoader, load_snapshot
 from .groups_dialog import GroupsDialog
@@ -71,6 +72,42 @@ class CredentialsDialog(QDialog):
             problem = "Username must be 3-20 letters, digits or _."
         elif self._signup and len(self.password.text()) < 8:
             problem = "Password must be at least 8 characters."
+        if problem:
+            showWarning(problem, title="AnkiHelper", parent=self)
+            return
+        self.accept()
+
+
+class DeleteAccountDialog(QDialog):
+    """Account deletion confirmation: type the account email and the password."""
+
+    def __init__(self, parent: Any, expected_email: str) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("AnkiHelper: Delete account")
+        self._expected_email = expected_email
+        self.email = QLineEdit()
+        self.password = QLineEdit()
+        self.password.setEchoMode(QLineEdit.EchoMode.Password)
+        form = QFormLayout()
+        form.addRow(f"Type {expected_email} to confirm", self.email)
+        form.addRow("Password", self.password)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        ok = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        if ok is not None:
+            ok.setText("Delete account")
+        buttons.accepted.connect(self._validate)
+        buttons.rejected.connect(self.reject)
+        layout = QVBoxLayout(self)
+        layout.addWidget(_hint(DELETE_WARNING))
+        layout.addLayout(form)
+        layout.addWidget(buttons)
+
+    def _validate(self) -> None:
+        problem = validate_delete(
+            self._expected_email, self.email.text(), self.password.text()
+        )
         if problem:
             showWarning(problem, title="AnkiHelper", parent=self)
             return
@@ -413,6 +450,45 @@ class Controller:
             self.client.logout, lambda _future: tooltip("AnkiHelper: logged out")
         )
 
+    def delete_account(self) -> None:
+        assert mw is not None
+        mw.taskman.run_in_background(self.client.get_me, self._on_me_for_delete)
+
+    def _on_me_for_delete(self, future: Future[UserResponse]) -> None:
+        assert mw is not None
+        try:
+            me = future.result()
+        except AnkiHelperError as exc:
+            log.info("account lookup before deletion failed: %s", exc)
+            showWarning(str(exc), title="AnkiHelper")
+            return
+        except Exception:
+            _unexpected("account lookup")
+            return
+        dialog = DeleteAccountDialog(mw, me.email or "")
+        if not dialog.exec():
+            return
+        password = dialog.password.text()
+        mw.taskman.run_in_background(
+            lambda: self.client.delete_account(password), self._on_delete_result
+        )
+
+    def _on_delete_result(self, future: Future[None]) -> None:
+        try:
+            future.result()
+        except AnkiHelperError as exc:
+            log.info("account deletion failed: %s", exc)
+            showWarning(str(exc), title="AnkiHelper")
+            return
+        except Exception:
+            _unexpected("account deletion")
+            return
+        if self._groups_dialog is not None:
+            self._groups_dialog.close()
+        self._last_pushed = None
+        self.groups.reset()
+        tooltip("AnkiHelper: account deleted")
+
 
 def setup() -> Controller:
     assert mw is not None
@@ -422,6 +498,7 @@ def setup() -> Controller:
         ("Log in...", controller.log_in),
         ("Sign up...", controller.sign_up),
         ("Log out", controller.log_out),
+        ("Delete account...", controller.delete_account),
         ("Groups...", controller.open_groups),
         None,
         ("Test connection", controller.test_connection),

@@ -71,6 +71,7 @@ flowchart LR
 - **Log in**: email and password dialog; keeps only the refresh token.
 - **Sign up**: email, username and password dialog; calls `POST /auth/signup`.
 - **Log out**: `POST /auth/logout`, then deletes the stored token.
+- **Delete account...**: shows what is lost, asks you to type your account email (looked up with `GET /auth/me`) and your password, then calls `DELETE /auth/me`. A wrong password keeps the account. On success the stored token is deleted and the Groups tab is reset.
 - **Test connection**: calls `GET /auth/me` with the current session.
 - **Push today's reviews**: `PUT /reviews/daily` (also runs automatically).
 - **Groups...**: opens the Groups screen.
@@ -82,6 +83,7 @@ flowchart LR
 | --- | --- |
 | `POST /auth/signup` | Sign up (`{email, password, username}`) |
 | `POST /auth/login`, `/auth/refresh`, `/auth/logout` | Session handling |
+| `DELETE /auth/me` | Delete account (password in body, never retried) |
 | `GET /auth/me` | Test connection |
 | `PUT /reviews/daily` | Push today's running totals |
 | `GET /groups`, `GET /groups/{id}/reviews` | Group list and the selected group's past year |
@@ -109,6 +111,7 @@ addon/
   ui.py              menus, hooks, background tasks (only module importing aqt)
   api_client.py      HTTP client: retries, 401 handling, endpoint methods
   session.py         tokens, login/refresh/logout, response checking
+  delete_logic.py    pure checks for the Delete account dialog
   token_store.py     refresh token file in user_files/ (atomic writes)
   stats.py           revlog -> daily and yearly stats
   heatmap.py         HTML/SVG/CSS/JS heatmap rendering

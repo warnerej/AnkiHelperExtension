@@ -14,6 +14,7 @@ All bodies and responses are JSON. Every endpoint except `/health`, `/auth/signu
 | `POST /auth/refresh` | no | `{refresh_token}` | new `{access_token, refresh_token, token_type, expires_in}` |
 | `GET /auth/me` | yes | | `{id, email}` |
 | `POST /auth/logout` | yes | | 204, ends this session |
+| `DELETE /auth/me` | yes | `{password}` | 204; irreversible (deletes reviews and memberships; owned groups pass to the longest-standing member, or are deleted if empty); 403 for a wrong password. The add-on never retries it |
 | `PUT /reviews/daily` | yes | `{total_reviews, study_date, retention?, study_minutes?}` | the saved row (below) |
 | `GET /reviews/daily` | yes | query: `start`, `end` (ISO dates, optional), `limit` (1-365, default 90) | list of rows, newest first |
 | `GET /reviews/daily/{study_date}` | yes | | one row, or 404 |
