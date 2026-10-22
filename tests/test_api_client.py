@@ -170,20 +170,35 @@ def test_cold_start_threads_share_one_session_and_refresh(backend, store, settin
     store.save("refresh0", "http://localhost:8000")  # restored session, no access token
     backend.on("POST", "/auth/refresh", (200, tokens(2)))
     backend.on("GET", "/auth/me", ME)
-    client = ApiClient(lambda: settings, store, transport=httpx.MockTransport(backend))
-    barrier = threading.Barrier(5)
+    entered, release = threading.Event(), threading.Event()
+    settings_calls: list[int] = []
+
+    def get_settings() -> Settings:
+        settings_calls.append(1)
+        entered.set()
+        release.wait(5)  # hold the first caller inside the session-building lock
+        return settings
+
+    client = ApiClient(get_settings, store, transport=httpx.MockTransport(backend))
     errors: list[Exception] = []
 
     def work():
-        barrier.wait()
         try:
             client.get_me()
         except Exception as exc:  # noqa: BLE001  # pragma: no cover
             errors.append(exc)
 
-    threads = [threading.Thread(target=work) for _ in range(5)]
-    [t.start() for t in threads]
-    [t.join() for t in threads]
+    first = threading.Thread(target=work)
+    first.start()
+    assert entered.wait(5)
+    second = threading.Thread(target=work)
+    second.start()
+    second.join(0.2)
+    assert second.is_alive()  # blocked on the lock, not building its own session
+    assert len(settings_calls) == 1
+    release.set()
+    first.join(5)
+    second.join(5)
     assert not errors
     assert backend.count("POST", "/auth/refresh") == 1
 
