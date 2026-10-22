@@ -35,3 +35,4 @@ ignore = ["E501"]
 include = ["addon", "tests"]
 exclude = ["addon/vendor", "**/__pycache__"]
 pythonVersion = "3.13"
+typeCheckingMode = "standard"

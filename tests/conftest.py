@@ -1,4 +1,6 @@
 import json
+from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -22,9 +24,9 @@ class FakeBackend:
 
     def __init__(self) -> None:
         self.calls: list[httpx.Request] = []
-        self.handlers: dict[tuple[str, str], list] = {}
+        self.handlers: dict[tuple[str, str], list[Any]] = {}
 
-    def on(self, method: str, path: str, *responses) -> None:
+    def on(self, method: str, path: str, *responses: Any) -> None:
         self.handlers[(method, path)] = list(responses)
 
     def count(self, method: str, path: str) -> int:
@@ -56,25 +58,36 @@ def settings() -> Settings:
 
 
 @pytest.fixture
-def store(tmp_path) -> TokenStore:
+def store(tmp_path: Path) -> TokenStore:
     return TokenStore(tmp_path / "user_files" / "session.json")
 
 
-@pytest.fixture
-def make_client(backend, settings, store):
-    """Client factory. Logs in first when a /auth/login response is scripted."""
-    sleeps: list[float] = []
+class ClientFactory:
+    """Builds clients on the fake backend. Logs in first when a /auth/login
+    response is scripted."""
 
-    def factory(*, login: bool = True) -> ApiClient:
+    def __init__(
+        self, backend: FakeBackend, settings: Settings, store: TokenStore
+    ) -> None:
+        self._backend = backend
+        self._settings = settings
+        self._store = store
+        self.sleeps: list[float] = []
+
+    def __call__(self, *, login: bool = True) -> ApiClient:
         client = ApiClient(
-            lambda: settings,
-            store,
-            transport=httpx.MockTransport(backend),
-            sleep=sleeps.append,
+            lambda: self._settings,
+            self._store,
+            transport=httpx.MockTransport(self._backend),
+            sleep=self.sleeps.append,
         )
-        if login and ("POST", "/auth/login") in backend.handlers:
+        if login and ("POST", "/auth/login") in self._backend.handlers:
             client.login("a@b.c", "pw-secret")
         return client
 
-    factory.sleeps = sleeps  # type: ignore[attr-defined]
-    return factory
+
+@pytest.fixture
+def make_client(
+    backend: FakeBackend, settings: Settings, store: TokenStore
+) -> ClientFactory:
+    return ClientFactory(backend, settings, store)

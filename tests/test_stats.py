@@ -1,5 +1,7 @@
+from collections.abc import Iterator
 from datetime import date, datetime
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from anki.collection import Collection
@@ -8,7 +10,7 @@ from addon.stats import DAY_SECONDS, TodayStats, today_stats, year_stats
 
 
 @pytest.fixture
-def col(tmp_path):
+def col(tmp_path) -> Iterator[Collection]:
     c = Collection(str(tmp_path / "c.anki2"))
     yield c
     c.close()
@@ -43,7 +45,9 @@ def test_study_date_follows_rollover():
         sched=SimpleNamespace(day_cutoff=cutoff),
         db=SimpleNamespace(first=lambda *_a: [0, None, None, None]),
     )
-    assert today_stats(fake) == TodayStats(date(2026, 2, 1), 0, None, 0)
+    assert today_stats(cast(Collection, fake)) == TodayStats(
+        date(2026, 2, 1), 0, None, 0
+    )
 
 
 def test_retention_counts_only_review_type_answers(col):

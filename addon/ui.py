@@ -1,4 +1,5 @@
 import time
+from collections.abc import Callable
 from concurrent.futures import Future
 from pathlib import Path
 from typing import Any
@@ -122,7 +123,12 @@ class Controller:
             bool(self._config.get("debug_logging")),
         )
 
-    def _read_year(self, days: int, success: Any, failure: Any) -> None:
+    def _read_year(
+        self,
+        days: int,
+        success: Callable[[YearReviews], None],
+        failure: Callable[[Exception], None],
+    ) -> None:
         """Read the last `days` days' stats through QueryOp, which owns the collection."""
         assert mw is not None
         QueryOp(

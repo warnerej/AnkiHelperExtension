@@ -1,6 +1,7 @@
 import threading
 import time
 from collections.abc import Callable
+from typing import Any
 
 import httpx
 
@@ -248,7 +249,7 @@ class Session:
             ) from exc
         log.info("token refreshed")
 
-    def _post(self, path: str, **kwargs) -> httpx.Response:
+    def _post(self, path: str, **kwargs: Any) -> httpx.Response:
         try:
             resp = self._http.post(path, **kwargs)
         except httpx.TimeoutException as exc:

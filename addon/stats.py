@@ -1,8 +1,11 @@
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING
 
 from .models import ReviewDay, YearReviews
+
+if TYPE_CHECKING:
+    from anki.collection import Collection
 
 DAY_SECONDS = 86400
 MAX_STUDY_MINUTES = 1440
@@ -18,17 +21,19 @@ class TodayStats:
     study_minutes: int
 
 
-def today_stats(col: Any) -> TodayStats:
+def today_stats(col: "Collection") -> TodayStats:
     """Return running stats for the current Anki day.
 
     The day boundary is the scheduler's rollover ("next day starts at"), not
     midnight. Rows with ease 0 are manual reschedules, not reviews. Retention is
     Anki's "true retention": the share of review-type answers that were not Again.
     """
+    db = col.db
+    assert db is not None
     cutoff: int = col.sched.day_cutoff
     # Noon of the Anki day: far from rollover, so DST shifts cannot change the date.
     study_date = datetime.fromtimestamp(cutoff - DAY_SECONDS // 2).date()
-    row = col.db.first(
+    row = db.first(
         "select count(), sum(time),"
         " sum(case when type = ? then 1 else 0 end),"
         " sum(case when type = ? and ease > 1 then 1 else 0 end)"
@@ -43,15 +48,17 @@ def today_stats(col: Any) -> TodayStats:
     return TodayStats(study_date, total, retention, minutes)
 
 
-def year_stats(col: Any, days: int = YEAR_DAYS) -> YearReviews:
-    """Per-day stats for the last `days` Anki days, in the shape friends use.
+def year_stats(col: "Collection", days: int = YEAR_DAYS) -> YearReviews:
+    """Per-day stats for the last `days` Anki days, as the history upload sends them.
 
     Days are bucketed by the scheduler rollover, like `today_stats`.
     """
+    db = col.db
+    assert db is not None
     cutoff: int = col.sched.day_cutoff
     today = datetime.fromtimestamp(cutoff - DAY_SECONDS // 2).date()
     cutoff_ms = cutoff * 1000
-    rows = col.db.all(
+    rows = db.all(
         "select (? - id - 1) / ?, count(), sum(time),"
         " sum(case when type = ? then 1 else 0 end),"
         " sum(case when type = ? and ease > 1 then 1 else 0 end)"
