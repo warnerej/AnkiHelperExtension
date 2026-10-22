@@ -173,10 +173,10 @@ class ApiClient:
         }
         if stats.retention is not None:
             body["retention"] = stats.retention
-        try:
-            return DailyReview.from_dict(self.put("/reviews/daily", json=body).json())
-        except ValueError as exc:
-            raise ServerError("Unexpected response from /reviews/daily") from exc
+        path = "/reviews/daily"
+        return _parse(
+            path, lambda: DailyReview.from_dict(self.put(path, json=body).json())
+        )
 
     def get_history_status(self) -> HistoryStatus:
         path = "/reviews/history/status"
@@ -212,10 +212,8 @@ class ApiClient:
         return _parse(path, lambda: HistoryResult.from_dict(resp.json()))
 
     def get_me(self) -> UserResponse:
-        try:
-            return UserResponse.from_dict(self.get("/auth/me").json())
-        except ValueError as exc:
-            raise ServerError("Unexpected response from /auth/me") from exc
+        path = "/auth/me"
+        return _parse(path, lambda: UserResponse.from_dict(self.get(path).json()))
 
     # --- groups ---
 

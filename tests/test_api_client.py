@@ -873,3 +873,37 @@ def test_refresh_rejection_logs_unknown_age_after_restore(
     with caplog.at_level("INFO", logger="ankihelper"), pytest.raises(NotLoggedInError):
         make_client(login=False).get_me()
     assert "unknown (restored from disk)" in caplog.text
+
+
+def test_malformed_bodies_map_to_server_error(backend, make_client):
+    backend.on("POST", "/auth/login", (200, tokens(1)))
+    backend.on("GET", "/auth/me", (200, ["not", "an", "object"]))
+    backend.on("PUT", "/reviews/daily", (200, {"unexpected": True}))
+    client = make_client()
+    with pytest.raises(ServerError, match="/auth/me"):
+        client.get_me()
+    with pytest.raises(ServerError, match="/reviews/daily"):
+        client.put_daily_reviews(TodayStats(date(2026, 10, 22), 5, None, 3))
+
+
+@pytest.mark.parametrize(
+    ("call", "method", "path"),
+    [
+        (lambda c: c.delete_group("g1"), "DELETE", "/groups/g1"),
+        (lambda c: c.allow_username("g1", "amy"), "POST", "/groups/g1/allowed"),
+        (
+            lambda c: c.disallow_username("g1", "amy"),
+            "DELETE",
+            "/groups/g1/allowed/amy",
+        ),
+        (lambda c: c.transfer_ownership("g1", "amy"), "POST", "/groups/g1/transfer"),
+    ],
+)
+def test_body_less_group_calls_raise_on_error_status(
+    backend, make_client, call, method, path
+):
+    backend.on("POST", "/auth/login", (200, tokens(1)))
+    backend.on(method, path, (403, {"detail": "not the owner"}))
+    with pytest.raises(ApiError) as info:
+        call(make_client())
+    assert info.value.status_code == 403 and info.value.detail == "not the owner"
