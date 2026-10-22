@@ -2,26 +2,33 @@
 
 Anki add-on (client) for AnkiHelper. It reads study stats from the local Anki collection, pushes them to the AnkiHelper FastAPI backend (Supabase-backed), and pulls stats back to display progress for the user and others. Endpoint reference: the backend repo's `docs/API_GUIDE.md` (`API_GUIDE.md` here only links to it); overview and setup: `README.md`.
 
-**Status:** backend has auth (`/auth/signup|login|refresh|me|logout`, `DELETE /auth/me`), daily reviews (`PUT/GET /reviews/daily`, `GET /reviews/daily/{date}`) and groups (`list_groups`, `join_group`, `get_group_reviews`, ... on `ApiClient`). The add-on implements login/logout dialogs, signup, a "Forgot password?" button in the login dialog (`POST /auth/forgot-password`, never retried, same generic message either way), Delete account (confirm by typing the account email plus the password; never retried), stored-refresh-token session restore, daily push, the Groups screen (Tools > AnkiHelper > Groups...) and the Groups tab on the deck browser (picker remembered in `selected_group`, one `get_group_reviews` call per group). It also uploads review history: an automatic once-per-account 365-day backfill (guarded: waits for the first AnkiWeb sync, never uploads an empty year), a 7-day catch-up after each sync, and a manual Tools > AnkiHelper > Re-upload review history... (`PUT /reviews/history`, `GET /reviews/history/status`). Sharing is opt-in: `consent_logic.py` plus the `sharing_consent` config key gate the daily push, the final push on profile close, the history backfill and re-upload (Tools > AnkiHelper > Sharing toggles it; opting out keeps server data). The old per-user friends fetch and `friends` config are gone.
+Sibling repo: the backend `AnkiHelper` owns the API contract and limits; this add-on mirrors a few (group name length, 365-day windows), so check it when a backend limit changes.
+
+**Status:** heading for the first public release (0.1.0); `CHANGELOG.md` has the detail and `ROADMAP.md` (its "Before the public release" checklist) is the open work. The add-on implements:
+- Account: login/logout, signup, "Forgot password?" (`POST /auth/forgot-password`, never retried, same generic message either way), Delete account (confirm by typing the account email plus the password; never retried), stored-refresh-token session restore.
+- Daily push of the running total, and the Groups screen (Tools > AnkiHelper > Groups...) plus the Groups tab on the deck browser (picker remembered in `selected_group`, one `get_group_reviews` call per group).
+- Review history (`PUT /reviews/history`, `GET /reviews/history/status`): an automatic once-per-account 365-day backfill (guarded: waits for the first AnkiWeb sync, never uploads an empty year), a 7-day catch-up after each sync, and a manual Tools > AnkiHelper > Re-upload review history...
+- Sharing is opt-in: `consent_logic.py` plus the `sharing_consent` config key gate the daily push, the final push on profile close, the history backfill and re-upload (Tools > AnkiHelper > Sharing toggles it; opting out keeps server data).
 
 ## Environment
 - `uv` project. Python is pinned to **3.13** because Anki bundles its own interpreter (not 3.14). Verify against the installed Anki (Help > About) before changing.
-- `uv sync`, `uv run pytest`, `uv run ruff check .`, `uv run pyright`.
+- `uv sync`, `uv run pytest`, `uv run ruff check .`, `uv run pyright` (CI, `.github/workflows/ci.yml`, runs them).
 - Dev-only deps: `anki`, `aqt`, `pytest`, `ruff`, `pyright`. Anki provides these at runtime; never vendor them.
 - Runtime dep `httpx` (and its dependencies) is not installed by Anki, so it gets vendored into `addon/vendor/` at package time (`uv pip install --target addon/vendor ...`). Vendor pure-Python packages only (no compiled extensions) so one build works on every OS; response models are stdlib dataclasses for this reason.
+- Vendored licenses must ship: `scripts/package.sh` copies each package's `dist-info/licenses/` to `licenses/<package>/` in the zip before deleting the `dist-info` folders, and fails if a package has none.
 
 ## Layout
 - `addon/` is what gets zipped to `.ankiaddon`. Only the Qt modules (`ui.py`, `dialogs.py`, `groups_dialog.py`) import `aqt`; everything else is plain Python so tests run without Anki.
   - `__init__.py` (entry; sets up `vendor/` path, calls `ui.setup()` inside Anki), `ui.py` (`Controller`: menus, hooks, daily push, signup) + `account_state.py` (pure: logged-in flag, last push, per-account reset) + `dialogs.py` (credentials/delete/empty-upload Qt dialogs)
   - `consent_logic.py` (pure: consent wording, `has_consent`, `with_consent`; gating happens in `ui.py`)
   - `groups_logic.py` (pure Groups-screen decisions: validation, owner/member controls, messages) + `groups_dialog.py` (Qt dialog, opened by `Controller.open_groups`)
-  - `history_logic.py` (pure history-upload decisions) + `history_backfill.py` (backfill/catch-up sequencing, Anki bits injected),
+  - `history_logic.py` (pure history-upload decisions) + `history_backfill.py` (backfill/catch-up sequencing, Anki bits injected)
   - `delete_logic.py` (pure Delete-account checks), `reset_logic.py` (pure forgot-password checks), `group_loader.py` + `group_state.py` (groups fetch/retry state machine, with Anki bits injected; pure decisions)
   - `api_client.py` (endpoints, retries), `session.py` (tokens, login/refresh/logout), `token_store.py` (refresh token file in `user_files/`), `settings.py`, `models.py`, `errors.py`, `log.py`
   - `stats.py` (revlog -> stats), `heatmap.py` (HTML/SVG rendering)
   - `config.example.json`, `config.md`, `manifest.json`, `vendor/` (git-ignored, built by packaging)
-- `tests/`, `scripts/package.sh`.
-- `ROADMAP.md` (open work, read first when continuing); `docs/archive/` (finished plans and handoffs); `docs/PRIVACY.md`, `docs/TERMS.md`, `docs/ANKIWEB_LISTING.md` (drafts with `<SUPPORT_EMAIL>` / `<POLICY_URL>` placeholders).
+- `tests/`, `scripts/package.sh`, `.github/workflows/ci.yml`, `CHANGELOG.md`.
+- `ROADMAP.md` (open work, read first when continuing); `docs/archive/` (finished plans and handoffs); `docs/PRIVACY.md`, `docs/TERMS.md`, `docs/ANKIWEB_LISTING.md` (drafts with `<SUPPORT_EMAIL>` / `<POLICY_URL>` placeholders), `docs/images/` (README screenshots). `addon/user_files/` is runtime data (token file), not source.
 
 ## Auth flow the client implements
 1. User logs in via Tools > AnkiHelper (dialog): `POST /auth/login` -> `access_token`, `refresh_token`, `expires_in` (3600s). The password is never stored.

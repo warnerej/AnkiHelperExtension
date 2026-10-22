@@ -18,6 +18,9 @@ AnkiHelper turns your private Anki stats into a shared progress view. It draws a
 Nothing is uploaded until you accept a consent dialog. Once you do, AnkiHelper uploads your email, username, and per day (last 365 days) your review count, retention and minutes studied. Members of groups you join can see your username and those daily stats. Card contents, deck names and review times are never uploaded. Stop any time from Tools > AnkiHelper > Sharing, and remove your data with Tools > AnkiHelper > Delete account.
 Privacy policy: <POLICY_URL>
 
+**Credits**
+Based on the Anki add-on [Review Heatmap](https://github.com/glutanimate/review-heatmap/) by Glutanimate. [Click here to support Glutanimate's work](https://glutanimate.com/support-my-work/).
+
 **Getting started**
 1. Install, restart Anki, then open Tools > AnkiHelper.
 2. Sign up or log in, and accept (or decline) sharing.

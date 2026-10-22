@@ -156,4 +156,6 @@ CI (`.github/workflows/ci.yml`) runs ruff (check + format), pyright, pytest and 
 
 ## License
 
-MIT. See `LICENSE`.
+MIT. See `LICENSE`. Vendored dependency licenses and the Review Heatmap license (AGPL-3.0 with additional terms, `third_party/review-heatmap/LICENSE`) ship in the built add-on under `licenses/`.
+
+Based on the Anki add-on [Review Heatmap](https://github.com/glutanimate/review-heatmap/) by Glutanimate. [Click here to support Glutanimate's work](https://glutanimate.com/support-my-work/).
