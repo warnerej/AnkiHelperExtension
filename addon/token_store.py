@@ -35,8 +35,8 @@ class TokenStore:
             return None  # belongs to another server; leave it for that server
         return token
 
-    def save(self, refresh_token: str, base_url: str) -> None:
-        """Write atomically. Failures are logged, not raised: the in-memory session still works."""
+    def save(self, refresh_token: str, base_url: str) -> bool:
+        """Write atomically; True if written. Failures are logged, not raised: the in-memory session still works."""
         tmp = self._path.with_name(self._path.name + ".tmp")
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -48,7 +48,12 @@ class TokenStore:
             os.replace(tmp, self._path)
         except OSError as exc:
             log.info("could not save session file: %s", exc)
-            tmp.unlink(missing_ok=True)
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return False
+        return True
 
     def clear(self) -> None:
         try:

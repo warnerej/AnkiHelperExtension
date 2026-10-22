@@ -11,6 +11,7 @@ The add-on kept logging users out: `POST /auth/refresh` was rejected for refresh
 - Backend `AuthService.refresh` (`app/services/auth.py`): logs Supabase `code/status/message` (never the token); 401 only for `AuthApiError` with status < 500, else 502.
 
 ## To do
+Items 1-4 are done (uncommitted at the time of writing); only 5 remains.
 1. **Failed token save makes the disk token stale (medium).** `TokenStore.save` swallows `OSError` (`addon/token_store.py` ~49-51). If a rotation's save fails, memory holds the new token but disk holds the spent one; `_refresh_session` (`addon/session.py` ~198-201) then sends the spent token, the server rejects it, and the user is logged out (reuse may also revoke the family).
    - Fix: make `save` return a bool (or record the last token this process wrote) and have `Session` prefer `self._refresh` when the last save failed or the disk token equals one this process already spent.
    - Test (`tests/test_api_client.py`, uses `backend`/`make_client`/`store` fixtures): a store whose `save` fails after login; assert the next refresh sends the in-memory token.

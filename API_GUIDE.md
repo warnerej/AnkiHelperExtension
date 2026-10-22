@@ -81,4 +81,4 @@ Authorization: Bearer <access_token>
 | 404 | no review row for that date | treat as "no data" |
 | 429 | rate limit hit (history upload, group join, forgot-password) | tell the user to try later; don't retry |
 | 422 | body or query failed validation (negative total, bad or missing date, short password) | fix the request, don't retry unchanged |
-| 502 | the database call failed | retry later with backoff |
+| 502 | the database call failed; for `/auth/refresh`, the auth provider failed or throttled (rate limit, timeout, 5xx) | retry later with backoff; the add-on keeps the session |

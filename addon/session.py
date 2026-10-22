@@ -62,6 +62,7 @@ class Session:
         self._refresh: str | None = None
         self._expires_at = 0.0
         self._issued_at = 0.0
+        self._disk_stale = False  # last save failed: the file holds a spent token
 
     @property
     def is_logged_in(self) -> bool:
@@ -167,6 +168,7 @@ class Session:
         self._refresh = None
         self._expires_at = 0.0
         self._issued_at = 0.0
+        self._disk_stale = False
 
     def adopt_tokens(self, tokens: TokenResponse) -> None:
         """Use tokens obtained elsewhere (e.g. signup) as the current session."""
@@ -178,7 +180,7 @@ class Session:
         self._refresh = tokens.refresh_token
         self._issued_at = self._clock()
         self._expires_at = self._issued_at + tokens.expires_in
-        self._store_file.save(tokens.refresh_token, self._base_url)
+        self._disk_stale = not self._store_file.save(tokens.refresh_token, self._base_url)
 
     def _store(self, resp: httpx.Response) -> None:
         try:
@@ -198,7 +200,12 @@ class Session:
     def _refresh_session(self) -> None:
         # Prefer the file: another Anki process may have rotated the token since we
         # loaded it, and sending a spent token would make the server revoke the session.
-        refresh_token = self._store_file.load(self._base_url) or self._refresh
+        # Unless our last save failed: then the file holds a token we already spent.
+        if self._disk_stale and self._refresh:
+            log.info("session file is stale (last save failed); using in-memory token")
+            refresh_token = self._refresh
+        else:
+            refresh_token = self._store_file.load(self._base_url) or self._refresh
         self._access = None
         if refresh_token is None:
             self._clear()

@@ -72,3 +72,10 @@ def test_clear_is_idempotent(path):
     store.clear()
     store.clear()
     assert store.load(URL) is None
+
+
+def test_save_reports_failure(tmp_path):
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    assert TokenStore(blocker / "session.json").save("t", "http://x") is False
+    assert TokenStore(tmp_path / "ok" / "session.json").save("t", "http://x") is True

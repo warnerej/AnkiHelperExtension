@@ -83,6 +83,19 @@ def test_refresh_sends_newer_token_from_disk(backend, make_client, store):
     assert store.load("http://localhost:8000") == "refresh3"
 
 
+def test_refresh_uses_memory_token_after_failed_save(backend, make_client, store, monkeypatch):
+    backend.on("POST", "/auth/login", (200, tokens(1)))
+    backend.on("POST", "/auth/refresh", (200, tokens(3)))
+    backend.on("GET", "/auth/me", (401, {}), ME)
+    real_save = store.save
+    monkeypatch.setattr(store, "save", lambda *a: False)
+    client = make_client()  # login's save "fails": disk has no token
+    real_save("spent", "http://localhost:8000")  # stale file from an earlier rotation
+    client.get_me()
+    assert backend.body(2) == {"refresh_token": "refresh1"}
+    assert store.load("http://localhost:8000") == "spent"  # rotated token never reached disk
+
+
 def test_refresh_5xx_keeps_stored_session(backend, make_client, store):
     backend.on("POST", "/auth/login", (200, tokens(1)))
     backend.on("POST", "/auth/refresh", (502, {"detail": "down"}))

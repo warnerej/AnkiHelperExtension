@@ -25,7 +25,7 @@ Anki add-on (client) for AnkiHelper. It reads study stats from the local Anki co
 ## Auth flow the client implements
 1. User logs in via Tools > AnkiHelper (dialog): `POST /auth/login` -> `access_token`, `refresh_token`, `expires_in` (3600s). The password is never stored.
 2. Access token in memory only; the refresh token is persisted atomically to `user_files/session.json` after every rotation and restored on startup. Send `Authorization: Bearer <access_token>`.
-3. On 401: `POST /auth/refresh` (sending the token currently in `session.json`, since another Anki process may have rotated it), retry once. Token expiry uses wall-clock `time.time` (`monotonic` stops during macOS sleep). If refresh is rejected, clear the file and ask the user to log in (no silent re-login). Logout calls `POST /auth/logout` and deletes the file.
+3. On 401: `POST /auth/refresh` (sending the token currently in `session.json`, since another Anki process may have rotated it; if the last save failed, the in-memory token, since the file is stale), retry once. Token expiry uses wall-clock `time.time` (`monotonic` stops during macOS sleep). If refresh is rejected, clear the file and ask the user to log in (no silent re-login). Logout calls `POST /auth/logout` and deletes the file.
 4. Refresh tokens rotate and are single use. Never refresh before every call.
 
 ## Conventions

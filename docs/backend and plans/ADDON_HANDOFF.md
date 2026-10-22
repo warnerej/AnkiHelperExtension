@@ -15,7 +15,7 @@ The backend (`AnkiHelper` repo, branch `add-groups`) now supports groups and acc
 Migrations 0001-0009 are applied by hand in Supabase, in order; the add-on needs them applied on the live project.
 
 ## Auth (unchanged, plus one endpoint)
-Login with email/password → `access_token`, `refresh_token`; send `Authorization: Bearer <token>`; 401 → `/auth/refresh` → relogin. Signup requires a `username` (3-20 chars: letters, digits, `_`; stored lowercase; 409 if taken).
+Login with email/password → `access_token`, `refresh_token`; send `Authorization: Bearer <token>`; 401 → `/auth/refresh` → relogin. Refresh tokens are single use: the add-on sends the token on disk (another process may have rotated it), or its in-memory one if the last save failed. `/auth/refresh` returns 401 only for a definitive rejection and 502 for provider failures (429/408/5xx), which keep the session. Signup requires a `username` (3-20 chars: letters, digits, `_`; stored lowercase; 409 if taken).
 New: `DELETE /auth/me` body `{password}` → 204; 403 wrong password. Irreversible.
 
 ## Endpoints the add-on can use
