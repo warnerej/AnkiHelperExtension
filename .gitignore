@@ -16,3 +16,4 @@ addon/vendor/
 addon/user_files/
 config.json
 .DS_Store
+meta.json

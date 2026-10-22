@@ -49,7 +49,7 @@ flowchart LR
 
 1. Copy `addon/config.example.json` to `addon/config.json` (git-ignored).
 2. Edit `addon/config.json` (options below).
-3. Install the vendored dependencies: `uv pip install --target addon/vendor --python 3.13 "httpx>=0.28.1"`. Everything vendored is pure Python, so it works on any OS.
+3. Install the vendored dependencies (versions pinned by `uv.lock`): `uv export --no-dev --no-hashes --no-emit-project | uv pip install --target addon/vendor --python 3.13 -r -`. Everything vendored is pure Python, so it works on any OS.
 4. With Anki closed, link (or copy) `addon/` into Anki's add-ons folder as `ankihelper`. To find the folder, use Tools > Add-ons > View Files.
 
    | OS | Add-ons folder | Link command |
@@ -135,7 +135,7 @@ scripts/package.sh   builds the .ankiaddon
 
 ## Limitations and next steps
 
-- No CI yet.
+- CI: `.github/workflows/ci.yml` runs ruff (check + format), pyright, pytest and the package smoke test.
 
 ## License
 
