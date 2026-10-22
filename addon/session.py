@@ -21,6 +21,25 @@ REFRESH_MARGIN_SECONDS = 60
 log = get_logger()
 
 
+def format_detail(detail: object) -> str:
+    """Readable text for a FastAPI `detail`: a string, or a list of validation errors."""
+    if isinstance(detail, str):
+        return detail
+    if isinstance(detail, list):
+        parts = []
+        for item in detail:
+            if isinstance(item, dict) and item.get("msg"):
+                loc = [
+                    str(p) for p in item.get("loc", []) if p not in ("body", "query")
+                ]
+                msg = str(item["msg"])
+                parts.append(f"{'.'.join(loc)}: {msg}" if loc else msg)
+            else:
+                parts.append(str(item))
+        return "; ".join(parts)
+    return "" if detail is None else str(detail)
+
+
 def check_response(resp: httpx.Response) -> httpx.Response:
     """Return `resp` if 2xx, else raise the matching AnkiHelperError."""
     if resp.is_success:
@@ -30,7 +49,7 @@ def check_response(resp: httpx.Response) -> httpx.Response:
     detail = ""
     try:
         body = resp.json()
-        detail = str(body.get("detail", "")) if isinstance(body, dict) else ""
+        detail = format_detail(body.get("detail")) if isinstance(body, dict) else ""
     except ValueError:
         pass
     if resp.status_code == 401:
