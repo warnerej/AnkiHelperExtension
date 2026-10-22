@@ -23,40 +23,18 @@ Checks that must stay green: `uv run ruff check .`, `uv run ruff format --check 
 - The GitHub Actions workflow has never run on GitHub; only its commands were run locally.
 - The new race test (`test_cold_start_threads_share_one_session_and_refresh`) passed even against the old code. The lock is correct by inspection, but the test is only a smoke check. A deterministic version would block one thread inside `_get_settings` or the transport using a `threading.Event`.
 
-## Remaining, by priority
+## Done in the second pass (do not redo)
+- **11** Dead friends code removed (`render_members_html`, "user not found", `lit`, `is_owner_role`, unused `DetailControls` fields, `Session.is_logged_in`). CSS classes are now `.ah-group`/`.ah-member`; the screenshot is `docs/images/heatmap-groups.png`.
+- **10** Docs drift fixed (README, roadmap status, `pyproject.toml`, `API_GUIDE.md`).
+- **6/9** `addon/account_state.py` (`AccountState`, `restore_outcome`) owns `logged_in`, `last_pushed` and the reset; a generation counter drops a push result that arrives after the account changed. `tests/test_account_state.py`, `tests/test_settings.py` split out. The race test is now deterministic (fails without the lock).
+- **12** `get_me` and `put_daily_reviews` use `_parse`. The handoff's claim that `delete_group`/`allow_username` ignore the status was wrong: `check_response` already raises; tests added.
+- **13** Groups dialog: owner controls follow the role from the group list (invite-code check is only the fallback), closed-dialog guard, one load per selection, no `return self._invalid(...)`. Busy clicks are impossible because the dialog is disabled; the guard now logs.
+- **14** Pyright `standard` mode on with no fallout; `Collection` type for `stats.py`, typed `_read_year`, `Session._post`, conftest fixtures.
+- **15** `user_files/` is 0700, directory fsync after `os.replace`, redaction is a formatter (covers `stack_info`, leaves the record alone), `base_url` with userinfo rejected, settings messages lose the doubled "AnkiHelper:" prefix.
 
-### Medium
-- **Finish item 6.** The account flows (login, signup, logout, delete, `_reset_account_state`, `_last_pushed`, `_logged_in`) are still in `Controller`. Suggested first step: a small pure `AccountState` class holding those fields and the reset logic, unit-tested without Qt, then move the flows behind it. `_on_restore_result` still has its own try/except by design.
-- **Item 9, test gaps.**
-  - `ui.py` (about 590 lines) and `groups_dialog.py` have no tests. Extract decisions into pure modules (as `group_loader.py` and `history_logic.py` do), or add a thin test with a fake `mw`.
-  - Split `tests/test_api_client.py` (about 880 lines): it also holds `Settings` and `strip_friends` tests. Add `test_settings.py`; `test_session.py` now exists.
-  - The roadmap smoke tests (`addon-roadmap.md` around lines 158-164) are still unchecked.
-
-### Low
-- **10. Docs drift.**
-  - Stale test count in `README.md` (now 253).
-  - Duplicated phrase near `README.md:20`.
-  - `reset_logic.py` and `dialogs.py` missing from the README layout tree.
-  - `pyproject.toml` description still says "friends heatmaps".
-  - `addon-roadmap.md` says Tasks 1-3 are uncommitted and Task 5 is "Next"; both are out of date.
-  - Handoff docs in this folder are stale but README lists them as live.
-  - `API_GUIDE.md` mentions "Kantanly" without explanation.
-  - `refresh-logout-followups.md` item 2 (rate limits) is a backend task.
-- **11. Dead code from the removed friends feature.** `heatmap.render_members_html`, the "(user not found)" branch in `_render_profile`, the `.ah-friends`/`.ah-friend` CSS names, `HeatmapCell.lit`, `groups_logic.is_owner_role`, unused `DetailControls` fields (only `leave` and `invite_code` are read), `Session.is_logged_in`, `docs/images/heatmap-friends.png`. Only tests use several of these; remove the tests with them.
-- **12. Inconsistent error mapping in `api_client.py`.** `put_daily_reviews` and `get_me` hand-roll try/except instead of `_parse`; `delete_group`, `allow_username` and similar discard the response unchecked.
-- **13. `groups_dialog.py`.**
-  - `_call` silently drops clicks while `_busy`.
-  - `_fill_list` can trigger two loads.
-  - `return self._invalid(...)` returns a None expression.
-  - The `finished` callback can touch a closed dialog; check `alive()` from `dialogs.py`.
-  - Owner detection uses `invite_code is not None` (`groups_logic.py` around lines 67-77); prefer an explicit role from the server.
-- **14. Typing.** `Any` callbacks (`_read_year` in `ui.py`), untyped `**kwargs` (`Session._post`), `col: Any` in `stats.py`, untyped fixtures in `conftest.py`. Pyright is in basic mode; try `typeCheckingMode = "standard"`.
-- **15. Minor security/logging.**
-  - `user_files/` is created with default permissions and the directory isn't fsynced after `os.replace` (`token_store.py`).
-  - The log redaction filter ignores `stack_info` and mutates `record.msg` (`log.py`).
-  - `Settings` accepts a `base_url` with userinfo.
-  - Some messages repeat the "AnkiHelper:" prefix.
-- **16. Scattered constants** (`PUSH_THROTTLE_SECONDS`/`YEAR_CACHE_SECONDS` in `ui.py`, `group_state.py`, `history_backfill.py`, `api_client.py`). Optional `constants.py`.
-
-## Suggested order
-Live-Anki check of the finished work, then the `AccountState` extraction and item 9 together (it makes the flows testable), then 11 and 10 (cheap, shrink the surface), then 12-16 as time allows.
+## Still open
+- **Live-Anki check** of everything in `ui.py`, `dialogs.py` and `groups_dialog.py` (see "Not verified"), including the new Groups dialog behaviour.
+- **16** Scattered constants left as they are (moving them would add import churn for little gain).
+- `ui.py` is still ~590 lines. The account flows still live in `Controller`; only their state moved. Further extraction needs a fake `mw`.
+- Roadmap smoke-test checkboxes need a live Anki run.
+- Nothing is pushed; the CI workflow has never run on GitHub.

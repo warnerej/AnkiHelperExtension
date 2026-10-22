@@ -42,7 +42,7 @@ flowchart LR
 - **Resilient HTTP.** GET and PUT retry on network errors and 5xx with jittered exponential backoff; POST is never retried. Errors map to a typed hierarchy (`errors.py`: `AuthError`, `NetworkError`, `ServerError`, `ApiError`, …).
 - **Validated boundaries.** Responses are parsed into typed frozen dataclasses (`from_dict`, stdlib only); settings are validated up front (https required except for localhost, username format).
 - **Secrets handled carefully.** The password is never written to disk (only a rotating refresh token, in a private file), a logging filter redacts bearer tokens and credentials (and is tested), and the config holds no secrets. The add-on talks only to the AnkiHelper API, never to Supabase directly.
-- **Testable design.** Logic lives in pure modules (`stats`, `heatmap`, `group_loader`, `group_state`, `groups_logic`, `session`, `token_store`); only the Qt modules (`ui.py`, `dialogs.py`, `groups_dialog.py`) import `aqt`, and `addon/__init__.py` skips UI setup when Anki is absent so tests run in plain Python.
+- **Testable design.** Logic lives in pure modules (`stats`, `heatmap`, `group_loader`, `group_state`, `groups_logic`, `account_state`, `session`, `token_store`); only the Qt modules (`ui.py`, `dialogs.py`, `groups_dialog.py`) import `aqt`, and `addon/__init__.py` skips UI setup when Anki is absent so tests run in plain Python.
 - **Matches Anki's runtime.** Python is pinned to 3.13 to match Anki's bundled interpreter, and the one runtime dependency (`httpx`, pure Python) is vendored since Anki does not provide it.
 
 ## Setup
@@ -97,7 +97,7 @@ flowchart LR
 
 ```sh
 uv sync
-uv run pytest        # 251 tests
+uv run pytest        # 269 tests
 uv run ruff check .
 uv run pyright
 scripts/package.sh   # builds dist/ankihelper.ankiaddon
@@ -113,6 +113,7 @@ Packaging note: the vendored dependencies are pure Python, so a `.ankiaddon` bui
 addon/
   __init__.py        entry point; adds vendor/ to sys.path, sets up UI inside Anki
   ui.py              menus, hooks, background tasks (with the dialogs, the only code importing aqt)
+  account_state.py   pure login state, last-push memory and per-account reset
   dialogs.py         credentials, delete-account and empty-upload dialogs (Qt)
   api_client.py      HTTP client: retries, 401 handling, endpoint methods
   session.py         tokens, login/refresh/logout, response checking
