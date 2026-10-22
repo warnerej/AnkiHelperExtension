@@ -1,4 +1,7 @@
+import json
 import threading
+from datetime import date
+from pathlib import Path
 
 import httpx
 import pytest
@@ -6,6 +9,7 @@ import pytest
 from addon.errors import (
     ApiError,
     AuthError,
+    ClientClosedError,
     FeatureUnavailableError,
     NetworkError,
     NotConfiguredError,
@@ -13,7 +17,7 @@ from addon.errors import (
     ServerError,
 )
 from addon.models import ReviewDay, YearReviews
-from addon.settings import Settings, strip_legacy_credentials
+from addon.settings import LEGACY_KEYS, Settings, strip_legacy_credentials
 from addon.stats import TodayStats
 
 from .conftest import tokens
@@ -208,6 +212,52 @@ def test_close_keeps_stored_session(backend, make_client, store):
     make_client().close()
     assert backend.count("POST", "/auth/logout") == 0
     assert store.load("http://localhost:8000") == "refresh1"
+
+
+def test_closed_client_makes_no_requests(backend, make_client, store):
+    backend.on("POST", "/auth/login", (200, tokens(1)))
+    client = make_client()
+    client.close()
+    with pytest.raises(ClientClosedError):
+        client.put_daily_reviews(TodayStats(date(2026, 1, 31), 1, None, 0))
+    assert backend.count("POST", "/auth/refresh") == 0
+    assert store.load("http://localhost:8000") == "refresh1"
+
+
+def test_reopen_restores_from_stored_token(backend, make_client):
+    backend.on("POST", "/auth/login", (200, tokens(1)))
+    backend.on("POST", "/auth/refresh", (200, tokens(2)))
+    backend.on("GET", "/auth/me", ME)
+    client = make_client()
+    client.close()
+    client.reopen()
+    client.get_me()
+    assert backend.count("POST", "/auth/refresh") == 1
+    refresh_index = next(
+        i for i, c in enumerate(backend.calls) if c.url.path == "/auth/refresh"
+    )
+    assert backend.body(refresh_index)["refresh_token"] == "refresh1"
+    assert backend.calls[-1].headers["Authorization"] == "Bearer access2"
+
+
+def test_has_fresh_token(backend, make_client):
+    backend.on("POST", "/auth/login", (200, tokens(1)))
+    assert make_client(login=False).has_fresh_token() is False
+    client = make_client()
+    assert client.has_fresh_token() is True
+    client.close()
+    assert client.has_fresh_token() is False
+
+
+def test_has_fresh_token_false_inside_refresh_margin(backend, make_client):
+    backend.on("POST", "/auth/login", (200, tokens(1, expires_in=30)))
+    assert make_client().has_fresh_token() is False
+
+
+def test_config_example_has_no_retired_keys():
+    path = Path(__file__).parent.parent / "addon" / "config.example.json"
+    config = json.loads(path.read_text())
+    assert not set(config) & {*LEGACY_KEYS, "friends"}
 
 
 def test_login_persists_only_refresh_token(backend, make_client, store):

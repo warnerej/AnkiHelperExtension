@@ -66,6 +66,13 @@ class Session:
     def is_logged_in(self) -> bool:
         return self._access is not None
 
+    def has_fresh_token(self) -> bool:
+        """True if the access token is valid beyond the refresh margin."""
+        return (
+            self._access is not None
+            and self._clock() < self._expires_at - REFRESH_MARGIN_SECONDS
+        )
+
     def ensure_token(self) -> str:
         """A valid access token, restoring or refreshing only when needed."""
         with self._lock:

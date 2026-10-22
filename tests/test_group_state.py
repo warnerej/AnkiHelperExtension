@@ -1,4 +1,4 @@
-from addon.errors import ApiError, AuthError, NetworkError, ServerError
+from addon.errors import ApiError, AuthError, ClientClosedError, NetworkError, ServerError
 from addon.group_state import (
     ERROR,
     IDLE,
@@ -23,3 +23,4 @@ def test_should_retry():
     assert should_retry(ServerError("x"))
     assert not should_retry(AuthError("x"))
     assert not should_retry(ApiError(403, "x"))
+    assert not should_retry(ClientClosedError())

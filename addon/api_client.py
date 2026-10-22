@@ -9,6 +9,7 @@ import httpx
 from .errors import (
     ApiError,
     AuthError,
+    ClientClosedError,
     FeatureUnavailableError,
     NetworkError,
     NotConfiguredError,
@@ -87,9 +88,12 @@ class ApiClient:
         self._base_url = ""
         self._timeout = 0.0
         self._session: Session | None = None
+        self._closed = False
 
     def _ensure_session(self) -> Session:
         """(Re)build the HTTP client when the user edits base_url or timeout."""
+        if self._closed:
+            raise ClientClosedError()
         settings = self._get_settings()  # raises NotConfiguredError
         if (
             self._http is None
@@ -307,11 +311,25 @@ class ApiClient:
         self._ensure_session().account_deleted()
 
     def close(self) -> None:
-        """Release the HTTP client. The stored session is kept for the next start."""
+        """Release the HTTP client. The stored session is kept for the next start.
+
+        Terminal until reopen(): later calls raise ClientClosedError instead of
+        building a fresh session, whose token refresh Anki could cut off.
+        """
+        self._closed = True
         if self._http is not None:
             self._http.close()
             self._http = None
             self._session = None
+
+    def reopen(self) -> None:
+        """Allow requests again (a profile was reopened in the same Anki run)."""
+        self._closed = False
+
+    def has_fresh_token(self) -> bool:
+        """True if a request now needs no login or refresh."""
+        session = self._session
+        return not self._closed and session is not None and session.has_fresh_token()
 
     def _request_once(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         session = self._ensure_session()
@@ -327,11 +345,13 @@ class ApiClient:
     def _send(
         self, method: str, path: str, token: str, **kwargs: Any
     ) -> httpx.Response:
-        assert self._http is not None
+        http = self._http
+        if http is None:
+            raise ClientClosedError()
         headers = {**kwargs.pop("headers", {}), "Authorization": f"Bearer {token}"}
         start = time.monotonic()
         try:
-            resp = self._http.request(method, path, headers=headers, **kwargs)
+            resp = http.request(method, path, headers=headers, **kwargs)
         except httpx.TimeoutException as exc:
             log.info(
                 "%s %s timed out after %.0f ms",

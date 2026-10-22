@@ -36,3 +36,10 @@ class ApiError(AnkiHelperError):
 
 class FeatureUnavailableError(AnkiHelperError):
     """The backend predates the requested feature (404 on its endpoint)."""
+
+
+class ClientClosedError(AnkiHelperError):
+    """The client was closed with the profile; no further requests are made."""
+
+    def __init__(self, message: str = "AnkiHelper is shutting down.") -> None:
+        super().__init__(message)

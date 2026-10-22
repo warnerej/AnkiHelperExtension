@@ -33,6 +33,7 @@ Anki add-on (client) for AnkiHelper. It reads study stats from the local Anki co
 - Network calls run off the main thread (`mw.taskman.run_in_background`); never block the Qt UI.
 - Read the collection through Anki's APIs; never write to the collection DB directly.
 - `PUT /reviews/history` replaces its date range server-side: never upload a range from a collection that has not synced or has no reviews, except from the manual flow behind its explicit warning.
+- Never refresh tokens during or after profile close: Anki syncs after `profile_will_close` and can exit mid-refresh, losing the rotated single-use token. `ApiClient.close()` is terminal until `reopen()` (`profile_did_open`); `Controller._closing` skips sync/answer pushes meanwhile.
 - Sync must be idempotent: each push is an upsert of the day's running total, so re-sending is safe.
 - Tests use a fake HTTP transport (`httpx.MockTransport`) and temp `Collection` fixtures; no network.
 

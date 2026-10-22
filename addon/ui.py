@@ -193,11 +193,12 @@ class Controller:
             get_selected=lambda: str(self._config.get("selected_group") or "") or None,
             save_selected=self._save_selected_group,
             on_change=self._refresh_deck_browser,
-            is_active=lambda: self.view == "groups",
+            is_active=lambda: self.view == "groups" and not self._closing,
             notify=tooltip,
             warn=lambda message: showWarning(message, title="AnkiHelper"),
         )
         self._logged_in = False
+        self._closing = False
         self._synced_this_session = False
         self._reupload_inflight = False
         self.backfill = HistoryBackfiller(
@@ -376,15 +377,29 @@ class Controller:
         if self.view == "groups":
             self.groups.ensure()
 
+    def on_profile_open(self) -> None:
+        """A profile was reopened in the same Anki run (first open: setup() restored)."""
+        if not self._closing:
+            return
+        self._closing = False
+        self._synced_this_session = False
+        self.client.reopen()
+        self.restore_session()
+
     def on_profile_close(self) -> None:
         assert mw is not None
+        # Anki syncs after this hook; from here on nothing may start network work
+        # (a token refresh cut off by exit would lose the rotated refresh token).
+        self._closing = True
         if self._groups_dialog is not None:
             self._groups_dialog.close()
         # Push the final total, then close, in one worker so they cannot race.
         reading = self._read_today()
 
         def work() -> None:
-            if reading is not None:
+            if reading is not None and not self.client.has_fresh_token():
+                log.info("final review push skipped: token would need a refresh")
+            elif reading is not None:
                 try:
                     self.client.put_daily_reviews(reading)
                 except AnkiHelperError as exc:
@@ -416,10 +431,14 @@ class Controller:
         )
 
     def on_card_answered(self, *_args: Any) -> None:
+        if self._closing:
+            return
         if time.monotonic() - self._last_push_time >= PUSH_THROTTLE_SECONDS:
             self.push_today()
 
     def on_sync_finished(self) -> None:
+        if self._closing:
+            return
         self._synced_this_session = True
         self.push_today()
         self.backfill.maybe_run(after_sync=True)
@@ -655,6 +674,7 @@ def setup() -> Controller:
         menu.addAction(action)
     mw.form.menuTools.addMenu(menu)
     mw.addonManager.setConfigUpdatedAction(__name__, controller.on_config_updated)
+    gui_hooks.profile_did_open.append(controller.on_profile_open)
     gui_hooks.profile_will_close.append(controller.on_profile_close)
     gui_hooks.sync_did_finish.append(controller.on_sync_finished)
     gui_hooks.webview_did_receive_js_message.append(controller.on_js_message)
