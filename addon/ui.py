@@ -9,6 +9,7 @@ from aqt.operations import QueryOp
 from aqt.qt import QAction, QInputDialog, QMenu
 from aqt.utils import askUser, showInfo, showWarning, tooltip
 
+from .about_logic import ABOUT_HTML, ABOUT_TITLE
 from .account_state import AccountState, restore_outcome
 from .api_client import ApiClient
 from .consent_logic import CONSENT_MESSAGE, CONSENT_TITLE, has_consent, with_consent
@@ -621,6 +622,11 @@ def setup() -> Controller:
         ("Test connection", controller.test_connection),
         ("Push today's reviews", lambda: controller.push_today(manual=True)),
         ("Refresh groups", controller.groups.refresh_manually),
+        None,
+        (
+            "About...",
+            lambda: showInfo(ABOUT_HTML, title=ABOUT_TITLE, textFormat="rich"),
+        ),
     ):
         if item is None:
             menu.addSeparator()
