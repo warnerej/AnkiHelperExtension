@@ -1,3 +1,8 @@
+# Based on the Anki add-on Review Heatmap by Glutanimate
+# (https://github.com/glutanimate/review-heatmap/), licensed under the GNU Affero
+# General Public License version 3 with Additional Terms under Section 7 (see
+# third_party/review-heatmap/LICENSE). Modified by Elliot Warner in 2026 for AnkiHelper;
+# this is not the original Review Heatmap.
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta

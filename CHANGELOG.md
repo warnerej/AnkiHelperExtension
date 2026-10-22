@@ -17,6 +17,7 @@ Targeting 0.1.0, the first public release.
 - Draft privacy policy, terms and AnkiWeb listing under `docs/`; CI and reproducible packaging (`scripts/package.sh`).
 
 ### Changed
+- Relicensed from MIT to AGPL-3.0-or-later: the heatmap is based on Review Heatmap by Glutanimate (AGPL-3.0 with Additional Terms). Added an About dialog with its required attribution.
 - Sharing moved from a per-user friends list to groups; the `friends` config key is removed on startup.
 - The password is no longer kept in the config; credentials from older configs are stripped.
 - Default HTTP timeout raised from 15 to 60 seconds so a sleeping free-tier server can wake.

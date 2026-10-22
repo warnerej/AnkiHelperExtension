@@ -15,6 +15,7 @@ Sibling repo: the backend `AnkiHelper` owns the API contract and limits; this ad
 - `uv sync`, `uv run pytest`, `uv run ruff check .`, `uv run pyright` (CI, `.github/workflows/ci.yml`, runs them).
 - Dev-only deps: `anki`, `aqt`, `pytest`, `ruff`, `pyright`. Anki provides these at runtime; never vendor them.
 - Runtime dep `httpx` (and its dependencies) is not installed by Anki, so it gets vendored into `addon/vendor/` at package time (`uv pip install --target addon/vendor ...`). Vendor pure-Python packages only (no compiled extensions) so one build works on every OS; response models are stdlib dataclasses for this reason.
+- License: AGPL-3.0-or-later, because `addon/heatmap.py` is derived from Review Heatmap (AGPL-3.0 plus Additional Terms). Keep its header notice, the About dialog attribution and `third_party/review-heatmap/LICENSE` in the package. Don't move code under a more permissive license.
 - Vendored licenses must ship: `scripts/package.sh` copies each package's `dist-info/licenses/` to `licenses/<package>/` in the zip before deleting the `dist-info` folders, and fails if a package has none.
 
 ## Layout

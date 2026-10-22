@@ -1,7 +1,7 @@
 # AnkiHelperExtension
 
 ![Python 3.13](https://img.shields.io/badge/python-3.13-blue)
-![License: MIT](https://img.shields.io/badge/license-MIT-green)
+![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Anki add-on](https://img.shields.io/badge/Anki-add--on-informational)
 
 An Anki add-on that turns private study stats into a shared, social progress view. It reads review history from the local Anki collection, pushes daily totals to the AnkiHelper backend (FastAPI + Supabase), and draws a GitHub-style year heatmap of your reviews, and your groups', on Anki's deck browser.
@@ -156,6 +156,6 @@ CI (`.github/workflows/ci.yml`) runs ruff (check + format), pyright, pytest and 
 
 ## License
 
-MIT. See `LICENSE`. Vendored dependency licenses and the Review Heatmap license (AGPL-3.0 with additional terms, `third_party/review-heatmap/LICENSE`) ship in the built add-on under `licenses/`.
+AGPL-3.0-or-later. See `LICENSE`. The heatmap is based on Review Heatmap, whose Additional Terms are in `third_party/review-heatmap/LICENSE`. That file and the licenses of the vendored dependencies ship in the built add-on under `licenses/`.
 
 Based on the Anki add-on [Review Heatmap](https://github.com/glutanimate/review-heatmap/) by Glutanimate. [Click here to support Glutanimate's work](https://glutanimate.com/support-my-work/).

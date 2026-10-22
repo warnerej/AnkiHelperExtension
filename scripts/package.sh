@@ -33,6 +33,7 @@ for info in "$STAGE"/vendor/*.dist-info; do
 done
 # The heatmap is based on Review Heatmap (AGPL-3.0 plus additional terms), which also
 # requires its full license text to ship with every copy.
+cp LICENSE "$STAGE/LICENSE"
 mkdir "$STAGE/licenses/review-heatmap"
 cp third_party/review-heatmap/LICENSE "$STAGE/licenses/review-heatmap/LICENSE"
 find "$STAGE/vendor" -depth \( -name "*.dist-info" -o -name "__pycache__" -o -name "bin" \) -exec rm -rf {} +
