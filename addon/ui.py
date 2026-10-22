@@ -1,41 +1,21 @@
 import time
-from collections.abc import Callable
 from concurrent.futures import Future
 from pathlib import Path
 from typing import Any
 
 from aqt import gui_hooks, mw
 from aqt.operations import QueryOp
-from aqt.qt import (
-    QAction,
-    QDialog,
-    QDialogButtonBox,
-    QFormLayout,
-    QInputDialog,
-    QLabel,
-    QLineEdit,
-    QMenu,
-    QPushButton,
-    Qt,
-    QVBoxLayout,
-)
+from aqt.qt import QAction, QInputDialog, QMenu
 from aqt.utils import askUser, showInfo, showWarning, tooltip
 
 from .api_client import ApiClient
-from .delete_logic import DELETE_WARNING, validate_delete
-from .errors import AnkiHelperError, NotLoggedInError
+from .dialogs import CredentialsDialog, DeleteAccountDialog, EmptyUploadDialog, alive
+from .errors import AnkiHelperError, NetworkError, NotLoggedInError, ServerError
 from .group_loader import GroupLoader, load_snapshot
 from .groups_dialog import GroupsDialog
 from .heatmap import GROUP_CMD, GROUPS_CMD, RETRY_CMD, VIEW_CMD, render_heatmap_html
 from .history_backfill import HistoryBackfiller
-from .history_logic import (
-    CONFIRM_WORD,
-    has_reviews,
-    manual_confirmation,
-    result_message,
-    today_row,
-    typed_confirmation_ok,
-)
+from .history_logic import has_reviews, manual_confirmation, result_message, today_row
 from .log import get_logger, setup_logging
 from .models import (
     DailyReview,
@@ -45,165 +25,35 @@ from .models import (
     YearReviews,
 )
 from .reset_logic import RESET_SENT_MESSAGE, validate_reset_email
-from .settings import USERNAME_RE, Settings, strip_friends, strip_legacy_credentials
+from .settings import Settings, strip_friends, strip_legacy_credentials
 from .stats import YEAR_DAYS, TodayStats, today_stats, year_stats
 from .token_store import TokenStore
 
 log = get_logger()
 
 PUSH_THROTTLE_SECONDS = 300
+YEAR_CACHE_SECONDS = 60
 
 
-class CredentialsDialog(QDialog):
-    """Email + password, plus a username when signing up. Validates before accepting."""
-
-    def __init__(
-        self,
-        parent: Any,
-        title: str,
-        *,
-        signup: bool,
-        on_forgot: Callable[[str, Any], None] | None = None,
-    ) -> None:
-        super().__init__(parent)
-        self.setWindowTitle(title)
-        self._signup = signup
-        self._forgot: QPushButton | None = None
-        self.email = QLineEdit()
-        self.username = QLineEdit()
-        self.password = QLineEdit()
-        self.password.setEchoMode(QLineEdit.EchoMode.Password)
-        form = QFormLayout()
-        form.addRow("Email", self.email)
-        if signup:
-            form.addRow("Username", self.username)
-        form.addRow("Password", self.password)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(self._validate)
-        buttons.rejected.connect(self.reject)
-        layout = QVBoxLayout(self)
-        layout.addLayout(form)
-        if signup:
-            layout.addWidget(
-                _hint("Username: 3-20 letters, digits or _. Password: 8+ characters.")
-            )
-        if on_forgot is not None and not signup:
-            self._forgot = QPushButton("Forgot password?")
-            self._forgot.setFlat(True)
-            self._forgot.setAutoDefault(False)
-            self._forgot.setCursor(Qt.CursorShape.PointingHandCursor)
-            self._forgot.clicked.connect(
-                lambda: on_forgot(self.email.text().strip(), self)
-            )
-            layout.addWidget(self._forgot, alignment=Qt.AlignmentFlag.AlignLeft)
-        layout.addWidget(buttons)
-
-    def set_forgot_enabled(self, enabled: bool) -> None:
-        if self._forgot is not None:
-            self._forgot.setEnabled(enabled)
-
-    def _validate(self) -> None:
-        problem = None
-        if not self.email.text().strip() or not self.password.text():
-            problem = "Enter your email and password."
-        elif self._signup and not USERNAME_RE.fullmatch(
-            self.username.text().strip().lower()
-        ):
-            problem = "Username must be 3-20 letters, digits or _."
-        elif self._signup and len(self.password.text()) < 8:
-            problem = "Password must be at least 8 characters."
-        if problem:
-            showWarning(problem, title="AnkiHelper", parent=self)
-            return
-        self.accept()
-
-
-class DeleteAccountDialog(QDialog):
-    """Account deletion confirmation: type the account email and the password."""
-
-    def __init__(self, parent: Any, expected_email: str) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("AnkiHelper: Delete account")
-        self._expected_email = expected_email
-        self.email = QLineEdit()
-        self.password = QLineEdit()
-        self.password.setEchoMode(QLineEdit.EchoMode.Password)
-        form = QFormLayout()
-        form.addRow(f"Type {expected_email} to confirm", self.email)
-        form.addRow("Password", self.password)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        ok = buttons.button(QDialogButtonBox.StandardButton.Ok)
-        if ok is not None:
-            ok.setText("Delete account")
-        buttons.accepted.connect(self._validate)
-        buttons.rejected.connect(self.reject)
-        layout = QVBoxLayout(self)
-        layout.addWidget(_hint(DELETE_WARNING))
-        layout.addLayout(form)
-        layout.addWidget(buttons)
-
-    def _validate(self) -> None:
-        problem = validate_delete(
-            self._expected_email, self.email.text(), self.password.text()
-        )
-        if problem:
-            showWarning(problem, title="AnkiHelper", parent=self)
-            return
-        self.accept()
-
-
-class EmptyUploadDialog(QDialog):
-    """Stronger confirm for uploading an empty year: type the word to proceed."""
-
-    def __init__(self, parent: Any, message: str) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("AnkiHelper: Re-upload review history")
-        self.typed = QLineEdit()
-        form = QFormLayout()
-        form.addRow(f"Type {CONFIRM_WORD} to confirm", self.typed)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(self._validate)
-        buttons.rejected.connect(self.reject)
-        layout = QVBoxLayout(self)
-        layout.addWidget(_hint(message))
-        layout.addLayout(form)
-        layout.addWidget(buttons)
-
-    def _validate(self) -> None:
-        if not typed_confirmation_ok(self.typed.text()):
-            showWarning(
-                f"Type {CONFIRM_WORD} to confirm, or cancel.",
-                title="AnkiHelper",
-                parent=self,
-            )
-            return
-        self.accept()
-
-
-def _hint(text: str) -> QLabel:
-    label = QLabel(text)
-    label.setWordWrap(True)
-    return label
-
-
-def _alive(widget: Any) -> bool:
-    """False once Qt has deleted the widget's C++ object (e.g. the dialog was closed)."""
+def _settle[T](
+    future: Future[T], what: str, *, show: bool = True, parent: Any = None
+) -> tuple[bool, T | None]:
+    """Unwrap a worker's future. On failure log it, warn the user (if `show`), return (False, None)."""
     try:
-        widget.isVisible()
-    except RuntimeError:
-        return False
-    return True
-
-
-def _unexpected(what: str) -> None:
-    log.exception("unexpected error during %s", what)
-    showWarning("Unexpected error. See user_files/ankihelper.log.", title="AnkiHelper")
+        return True, future.result()
+    except AnkiHelperError as exc:
+        log.info("%s failed: %s", what, exc)
+        if show:
+            showWarning(str(exc), title="AnkiHelper", parent=parent)
+    except Exception:
+        log.exception("unexpected error during %s", what)
+        if show:
+            showWarning(
+                "Unexpected error. See user_files/ankihelper.log.",
+                title="AnkiHelper",
+                parent=parent,
+            )
+    return False, None
 
 
 class Controller:
@@ -218,9 +68,14 @@ class Controller:
         self._config: dict[str, Any] = {}
         user_files = Path(__file__).parent / "user_files"
         self.client = ApiClient(self._settings, TokenStore(user_files / "session.json"))
+        self._logged_in = False
+        self._closing = False
+        self._synced_this_session = False
+        self._reupload_inflight = False
         self._last_pushed: TodayStats | None = None
         self._forgot_pending = False
         self._last_push_time = 0.0
+        self._year_cache: tuple[float, YearReviews] | None = None
         self.view = "mine"
         self._groups_dialog: GroupsDialog | None = None
         self.groups = GroupLoader(
@@ -239,10 +94,6 @@ class Controller:
             notify=tooltip,
             warn=lambda message: showWarning(message, title="AnkiHelper"),
         )
-        self._logged_in = False
-        self._closing = False
-        self._synced_this_session = False
-        self._reupload_inflight = False
         self.backfill = HistoryBackfiller(
             is_logged_in=lambda: self._logged_in,
             uses_sync=lambda: mw.pm.sync_auth() is not None,
@@ -318,14 +169,8 @@ class Controller:
         self, future: Future[HistoryResult], history: YearReviews
     ) -> None:
         self._reupload_inflight = False
-        try:
-            result = future.result()
-        except AnkiHelperError as exc:
-            log.info("history re-upload failed: %s", exc)
-            showWarning(str(exc), title="AnkiHelper")
-            return
-        except Exception:
-            _unexpected("history re-upload")
+        ok, result = _settle(future, "history re-upload")
+        if not ok or result is None:
             return
         log.info("history re-upload wrote %d days", result.days_written)
         tooltip(result_message(result))
@@ -386,11 +231,14 @@ class Controller:
                 f"{exc}\n\nLog in now?", title="AnkiHelper"
             ):
                 self.log_in()
-        except AnkiHelperError as exc:
-            log.info("session restore failed: %s", exc)  # e.g. offline; retried on use
+        except (NetworkError, ServerError) as exc:
+            log.info("session restore failed: %s", exc)  # offline; retried on use
             self._logged_in = (
                 True  # a stored session exists; backfill retries after sync
             )
+        except AnkiHelperError as exc:
+            self._logged_in = False  # e.g. not configured or client closed: no session
+            log.info("session restore failed: %s", exc)
         except Exception:
             log.exception("unexpected error restoring session")
         else:
@@ -475,12 +323,14 @@ class Controller:
         )
 
     def on_card_answered(self, *_args: Any) -> None:
+        self._year_cache = None
         if self._closing:
             return
         if time.monotonic() - self._last_push_time >= PUSH_THROTTLE_SECONDS:
             self.push_today()
 
     def on_sync_finished(self) -> None:
+        self._year_cache = None
         if self._closing:
             return
         self._synced_this_session = True
@@ -493,20 +343,8 @@ class Controller:
         reading: TodayStats,
         manual: bool,
     ) -> None:
-        try:
-            saved = future.result()
-        except AnkiHelperError as exc:
-            log.info("review push failed: %s", exc)
-            if manual:
-                showWarning(str(exc), title="AnkiHelper")
-            return
-        except Exception:
-            log.exception("unexpected error pushing reviews")
-            if manual:
-                showWarning(
-                    "Unexpected error. See user_files/ankihelper.log.",
-                    title="AnkiHelper",
-                )
+        ok, saved = _settle(future, "review push", show=manual)
+        if not ok or saved is None:
             return
         self._last_pushed = reading
         log.info("pushed %d reviews for %s", saved.total_reviews, saved.study_date)
@@ -528,24 +366,15 @@ class Controller:
         mw.taskman.run_in_background(self.client.get_me, self._on_connection_result)
 
     def _on_connection_result(self, future: Future[UserResponse]) -> None:
-        try:
-            me = future.result()
-        except AnkiHelperError as exc:
-            log.info("test connection failed: %s", exc)
-            showWarning(str(exc), title="AnkiHelper")
-            return
-        except Exception:
-            log.exception("unexpected error during test connection")
-            showWarning(
-                "Unexpected error. See user_files/ankihelper.log.", title="AnkiHelper"
-            )
+        ok, me = _settle(future, "test connection")
+        if not ok or me is None:
             return
         tooltip(f"AnkiHelper: connected as {me.email or 'unknown user'}")
 
     def on_deck_browser_render(self, _deck_browser: Any, content: Any) -> None:
         """Append the heatmap to the main screen."""
         assert mw is not None
-        mine = year_stats(mw.col) if mw.col is not None else None
+        mine = self._year_for_render() if self.view == "mine" else None
         content.stats += render_heatmap_html(
             mine,
             self.groups.groups,
@@ -554,6 +383,27 @@ class Controller:
             self.view,
             self.groups.status,
         )
+
+    def _year_for_render(self) -> YearReviews | None:
+        """Own year of stats for the heatmap, cached; None if unavailable.
+
+        Runs on the main thread inside a render hook, so it must be cheap on
+        repeat renders and must never raise (that would break the main screen).
+        """
+        assert mw is not None
+        if mw.col is None:
+            return None
+        now = time.monotonic()
+        cached = self._year_cache
+        if cached is not None and now - cached[0] < YEAR_CACHE_SECONDS:
+            return cached[1]
+        try:
+            year = year_stats(mw.col)
+        except Exception:
+            log.exception("could not read review history for the heatmap")
+            return None
+        self._year_cache = (now, year)
+        return year
 
     def on_js_message(
         self, handled: tuple[bool, Any], message: str, _context: Any
@@ -622,32 +472,21 @@ class Controller:
 
     def _on_forgot_result(self, future: Future[None], parent: Any) -> None:
         self._forgot_pending = False
-        if _alive(parent):
+        if alive(parent):
             parent.set_forgot_enabled(True)
         else:
             parent = mw
-        try:
-            future.result()
-        except AnkiHelperError as exc:
-            log.info("password reset request failed: %s", exc)
-            showWarning(str(exc), title="AnkiHelper", parent=parent)
-            return
-        except Exception:
-            _unexpected("password reset")
+        ok, _ = _settle(future, "password reset request", parent=parent)
+        if not ok:
             return
         showInfo(RESET_SENT_MESSAGE, title="AnkiHelper", parent=parent)
 
     def _on_login_result(self, future: Future[None]) -> None:
-        try:
-            future.result()
-        except AnkiHelperError as exc:
-            log.info("login failed: %s", exc)
-            showWarning(str(exc), title="AnkiHelper")
-            return
-        except Exception:
-            _unexpected("login")
+        ok, _ = _settle(future, "login")
+        if not ok:
             return
         tooltip("AnkiHelper: logged in")
+        self._reset_account_state()
         self._logged_in = True
         self.push_today()
         self.backfill.maybe_run()
@@ -666,14 +505,8 @@ class Controller:
         )
 
     def _on_signup_result(self, future: Future[SignupResponse]) -> None:
-        try:
-            result = future.result()
-        except AnkiHelperError as exc:
-            log.info("signup failed: %s", exc)
-            showWarning(str(exc), title="AnkiHelper")
-            return
-        except Exception:
-            _unexpected("signup")
+        ok, result = _settle(future, "signup")
+        if not ok or result is None:
             return
         if result.confirmation_required:
             showInfo(
@@ -682,17 +515,29 @@ class Controller:
             )
         else:
             tooltip("AnkiHelper: account created and logged in")
+            self._reset_account_state()
             self._logged_in = True
             self.push_today()
             self.backfill.maybe_run()
 
     def log_out(self) -> None:
         assert mw is not None
+        if self._groups_dialog is not None:
+            self._groups_dialog.close()
+        self._reset_account_state()
+        mw.taskman.run_in_background(self.client.logout, self._on_logout_result)
+
+    def _on_logout_result(self, future: Future[None]) -> None:
+        ok, _ = _settle(future, "logout")
+        if ok:
+            tooltip("AnkiHelper: logged out")
+
+    def _reset_account_state(self) -> None:
+        """Forget everything tied to the previous account (logout, delete, new login)."""
+        self._last_pushed = None
         self._logged_in = False
         self.backfill.reset()
-        mw.taskman.run_in_background(
-            self.client.logout, lambda _future: tooltip("AnkiHelper: logged out")
-        )
+        self.groups.reset()
 
     def delete_account(self) -> None:
         assert mw is not None
@@ -700,14 +545,8 @@ class Controller:
 
     def _on_me_for_delete(self, future: Future[UserResponse]) -> None:
         assert mw is not None
-        try:
-            me = future.result()
-        except AnkiHelperError as exc:
-            log.info("account lookup before deletion failed: %s", exc)
-            showWarning(str(exc), title="AnkiHelper")
-            return
-        except Exception:
-            _unexpected("account lookup")
+        ok, me = _settle(future, "account lookup before deletion")
+        if not ok or me is None:
             return
         dialog = DeleteAccountDialog(mw, me.email or "")
         if not dialog.exec():
@@ -718,21 +557,12 @@ class Controller:
         )
 
     def _on_delete_result(self, future: Future[None]) -> None:
-        try:
-            future.result()
-        except AnkiHelperError as exc:
-            log.info("account deletion failed: %s", exc)
-            showWarning(str(exc), title="AnkiHelper")
-            return
-        except Exception:
-            _unexpected("account deletion")
+        ok, _ = _settle(future, "account deletion")
+        if not ok:
             return
         if self._groups_dialog is not None:
             self._groups_dialog.close()
-        self._last_pushed = None
-        self._logged_in = False
-        self.backfill.reset()
-        self.groups.reset()
+        self._reset_account_state()
         tooltip("AnkiHelper: account deleted")
 
 

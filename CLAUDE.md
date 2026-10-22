@@ -11,8 +11,8 @@ Anki add-on (client) for AnkiHelper. It reads study stats from the local Anki co
 - Runtime dep `httpx` (and its dependencies) is not installed by Anki, so it gets vendored into `addon/vendor/` at package time (`uv pip install --target addon/vendor ...`). Vendor pure-Python packages only (no compiled extensions) so one build works on every OS; response models are stdlib dataclasses for this reason.
 
 ## Layout
-- `addon/` is what gets zipped to `.ankiaddon`. Only `ui.py` imports `aqt`; everything else is plain Python so tests run without Anki.
-  - `__init__.py` (entry; sets up `vendor/` path, calls `ui.setup()` inside Anki), `ui.py` (`Controller`: menus, hooks, daily push, signup)
+- `addon/` is what gets zipped to `.ankiaddon`. Only the Qt modules (`ui.py`, `dialogs.py`, `groups_dialog.py`) import `aqt`; everything else is plain Python so tests run without Anki.
+  - `__init__.py` (entry; sets up `vendor/` path, calls `ui.setup()` inside Anki), `ui.py` (`Controller`: menus, hooks, daily push, signup) + `dialogs.py` (credentials/delete/empty-upload Qt dialogs)
   - `groups_logic.py` (pure Groups-screen decisions: validation, owner/member controls, messages) + `groups_dialog.py` (Qt dialog, opened by `Controller.open_groups`)
   - `history_logic.py` (pure history-upload decisions) + `history_backfill.py` (backfill/catch-up sequencing, Anki bits injected),
   - `delete_logic.py` (pure Delete-account checks), `reset_logic.py` (pure forgot-password checks), `group_loader.py` + `group_state.py` (groups fetch/retry state machine, with Anki bits injected; pure decisions)
