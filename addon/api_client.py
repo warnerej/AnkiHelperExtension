@@ -1,4 +1,5 @@
 import random
+import threading
 import time
 from collections.abc import Callable
 from typing import Any
@@ -91,31 +92,37 @@ class ApiClient:
         self._timeout = 0.0
         self._session: Session | None = None
         self._closed = False
+        # Worker threads share this client; without the lock two cold-start
+        # callers would each build a Session and refresh the same single-use token.
+        self._lock = threading.RLock()
 
     def _ensure_session(self) -> Session:
         """(Re)build the HTTP client when the user edits base_url or timeout."""
-        if self._closed:
-            raise ClientClosedError()
-        settings = self._get_settings()  # raises NotConfiguredError
-        if (
-            self._http is None
-            or self._session is None
-            or settings.base_url != self._base_url
-            or settings.timeout_seconds != self._timeout
-        ):
-            if self._http is not None:
-                self._http.close()
-            self._base_url = settings.base_url
-            self._timeout = settings.timeout_seconds
-            self._http = httpx.Client(
-                base_url=settings.base_url,
-                timeout=httpx.Timeout(
-                    settings.timeout_seconds, connect=CONNECT_TIMEOUT
-                ),
-                transport=self._transport,
-            )
-            self._session = Session(self._http, self._token_store, settings.base_url)
-        return self._session
+        with self._lock:
+            if self._closed:
+                raise ClientClosedError()
+            settings = self._get_settings()  # raises NotConfiguredError
+            if (
+                self._http is None
+                or self._session is None
+                or settings.base_url != self._base_url
+                or settings.timeout_seconds != self._timeout
+            ):
+                if self._http is not None:
+                    self._http.close()
+                self._base_url = settings.base_url
+                self._timeout = settings.timeout_seconds
+                self._http = httpx.Client(
+                    base_url=settings.base_url,
+                    timeout=httpx.Timeout(
+                        settings.timeout_seconds, connect=CONNECT_TIMEOUT
+                    ),
+                    transport=self._transport,
+                )
+                self._session = Session(
+                    self._http, self._token_store, settings.base_url
+                )
+            return self._session
 
     def request(
         self, method: str, path: str, *, retries: int | None = None, **kwargs: Any
@@ -337,15 +344,17 @@ class ApiClient:
         Terminal until reopen(): later calls raise ClientClosedError instead of
         building a fresh session, whose token refresh Anki could cut off.
         """
-        self._closed = True
-        if self._http is not None:
-            self._http.close()
-            self._http = None
-            self._session = None
+        with self._lock:
+            self._closed = True
+            if self._http is not None:
+                self._http.close()
+                self._http = None
+                self._session = None
 
     def reopen(self) -> None:
         """Allow requests again (a profile was reopened in the same Anki run)."""
-        self._closed = False
+        with self._lock:
+            self._closed = False
 
     def has_fresh_token(self) -> bool:
         """True if a request now needs no login or refresh."""
@@ -384,6 +393,11 @@ class ApiClient:
         except httpx.TransportError as exc:
             log.info("%s %s connection failed: %s", method, path, type(exc).__name__)
             raise NetworkError("Could not reach the AnkiHelper server.") from exc
+        except RuntimeError as exc:
+            # httpx raises this when close() ran on another thread mid-request.
+            if self._closed:
+                raise ClientClosedError() from exc
+            raise
         log.info(
             "%s %s -> %d (%.0f ms)",
             method,

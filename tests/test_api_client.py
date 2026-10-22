@@ -165,6 +165,30 @@ def test_concurrent_401s_trigger_one_refresh(backend, make_client, store):
     assert backend.count("POST", "/auth/refresh") == 1
 
 
+def test_cold_start_threads_share_one_session_and_refresh(backend, store, settings):
+    from addon.api_client import ApiClient
+
+    store.save("refresh0", "http://localhost:8000")  # restored session, no access token
+    backend.on("POST", "/auth/refresh", (200, tokens(2)))
+    backend.on("GET", "/auth/me", ME)
+    client = ApiClient(lambda: settings, store, transport=httpx.MockTransport(backend))
+    barrier = threading.Barrier(5)
+    errors: list[Exception] = []
+
+    def work():
+        barrier.wait()
+        try:
+            client.get_me()
+        except Exception as exc:  # noqa: BLE001  # pragma: no cover
+            errors.append(exc)
+
+    threads = [threading.Thread(target=work) for _ in range(5)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert not errors
+    assert backend.count("POST", "/auth/refresh") == 1
+
+
 def test_get_retries_twice_on_timeout(backend, make_client):
     backend.on("POST", "/auth/login", (200, tokens(1)))
     backend.on("GET", "/auth/me", httpx.ReadTimeout("slow"))
