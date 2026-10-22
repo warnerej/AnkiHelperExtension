@@ -23,7 +23,7 @@ def test_settings_ok_needs_only_base_url():
     s = Settings.from_config(
         {"base_url": "http://localhost:8000/", "timeout_seconds": "bad"}
     )
-    assert s.base_url == "http://localhost:8000" and s.timeout_seconds == 15
+    assert s.base_url == "http://localhost:8000" and s.timeout_seconds == 60
 
 
 def test_strip_legacy_credentials():

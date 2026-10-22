@@ -10,7 +10,7 @@ log = get_logger()
 
 USERNAME_RE = re.compile(r"[a-z0-9_]{3,20}")
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
-DEFAULT_TIMEOUT = 15.0
+DEFAULT_TIMEOUT = 60.0  # the free-tier host can take ~50s to wake up
 
 
 LEGACY_KEYS = ("email", "password", "username")

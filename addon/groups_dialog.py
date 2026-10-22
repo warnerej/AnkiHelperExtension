@@ -64,6 +64,9 @@ class GroupsDialog(QDialog):
         left.addWidget(join)
 
         self._title = QLabel("Select a group")
+        self._title.setTextFormat(
+            Qt.TextFormat.PlainText
+        )  # group names come from the server
         self._title.setStyleSheet("font-weight: bold;")
         self._members = QListWidget()
         self._leave = QPushButton("Leave group")

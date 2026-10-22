@@ -1,6 +1,7 @@
 {
-    "base_url": "https://api.example.com",
+    "base_url": "https://ankihelper.onrender.com",
     "selected_group": "",
-    "timeout_seconds": 15,
+    "timeout_seconds": 60,
+    "sharing_consent": false,
     "debug_logging": false
 }

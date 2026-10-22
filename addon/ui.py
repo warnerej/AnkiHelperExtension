@@ -11,6 +11,7 @@ from aqt.utils import askUser, showInfo, showWarning, tooltip
 
 from .account_state import AccountState, restore_outcome
 from .api_client import ApiClient
+from .consent_logic import CONSENT_MESSAGE, CONSENT_TITLE, has_consent, with_consent
 from .dialogs import CredentialsDialog, DeleteAccountDialog, EmptyUploadDialog, alive
 from .errors import AnkiHelperError, NotLoggedInError
 from .group_loader import GroupLoader, load_snapshot
@@ -96,7 +97,7 @@ class Controller:
             warn=lambda message: showWarning(message, title="AnkiHelper"),
         )
         self.backfill = HistoryBackfiller(
-            is_logged_in=lambda: self.account.logged_in,
+            is_logged_in=lambda: self.account.logged_in and self.has_consent(),
             uses_sync=lambda: mw.pm.sync_auth() is not None,
             synced_this_session=lambda: self._synced_this_session,
             fetch_status=self.client.get_history_status,
@@ -111,6 +112,39 @@ class Controller:
         )
         self.reload_config()
         self._migrate_legacy_config()
+
+    def has_consent(self) -> bool:
+        return has_consent(self._config)
+
+    def _set_consent(self, value: bool) -> None:
+        assert mw is not None
+        self._config = with_consent(self._config, value)
+        mw.addonManager.writeConfig(self._addon, self._config)
+
+    def ask_consent(self) -> bool:
+        """Show the sharing opt-in until the user has agreed; True if sharing is allowed."""
+        if self.has_consent():
+            return True
+        if askUser(CONSENT_MESSAGE, title=CONSENT_TITLE, defaultno=True):
+            self._set_consent(True)
+            return True
+        return False
+
+    def toggle_sharing(self) -> None:
+        """Menu action: opt in, or opt out and stop all uploads."""
+        self.reload_config()
+        if not self.has_consent():
+            if self.ask_consent() and self.account.logged_in:
+                self.push_today()
+                self.backfill.maybe_run()
+            return
+        if askUser(
+            "Stop sharing your stats? Nothing more will be uploaded. "
+            "Data already on the server stays until you use Delete account.",
+            title="AnkiHelper",
+        ):
+            self._set_consent(False)
+            tooltip("AnkiHelper: sharing stopped")
 
     def _settings(self) -> Settings:
         return Settings.from_config(self._config)
@@ -139,6 +173,8 @@ class Controller:
         """Menu action: replace the server's last year with this collection's data."""
         if not self.account.logged_in:
             showInfo(str(NotLoggedInError()), title="AnkiHelper")
+            return
+        if not self.ask_consent():
             return
         if self._reupload_inflight:
             return
@@ -284,7 +320,7 @@ class Controller:
         if self._groups_dialog is not None:
             self._groups_dialog.close()
         # Push the final total, then close, in one worker so they cannot race.
-        reading = self._read_today()
+        reading = self._read_today() if self.has_consent() else None
 
         def work() -> None:
             if reading is not None and not self.client.has_fresh_token():
@@ -307,6 +343,10 @@ class Controller:
     def push_today(self, *, manual: bool = False) -> None:
         """Send today's running review total. Must be called on the main thread."""
         assert mw is not None
+        if not self.has_consent():
+            if manual and self.ask_consent():
+                self.push_today(manual=True)
+            return
         reading = self._read_today()
         if reading is None:
             return
@@ -489,6 +529,7 @@ class Controller:
             return
         tooltip("AnkiHelper: logged in")
         self.account.start_session()
+        self.ask_consent()
         self.push_today()
         self.backfill.maybe_run()
 
@@ -517,6 +558,7 @@ class Controller:
         else:
             tooltip("AnkiHelper: account created and logged in")
             self.account.start_session()
+            self.ask_consent()
             self.push_today()
             self.backfill.maybe_run()
 
@@ -571,6 +613,7 @@ def setup() -> Controller:
         ("Log in...", controller.log_in),
         ("Sign up...", controller.sign_up),
         ("Log out", controller.log_out),
+        ("Sharing...", controller.toggle_sharing),
         ("Re-upload review history...", controller.reupload_history),
         ("Delete account...", controller.delete_account),
         ("Groups...", controller.open_groups),

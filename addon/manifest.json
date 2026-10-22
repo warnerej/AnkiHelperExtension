@@ -1,4 +1,6 @@
 {
     "package": "ankihelper",
-    "name": "AnkiHelper"
+    "name": "AnkiHelper",
+    "version": "0.1.0",
+    "min_point_version": 260500
 }

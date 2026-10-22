@@ -65,7 +65,8 @@ flowchart LR
 | --- | --- |
 | `base_url` | Backend URL. `https` required, except for `localhost`. |
 | `selected_group` | Group shown on the Groups tab; set automatically. An old `friends` list is removed on startup (with a one-time note). |
-| `timeout_seconds` | HTTP timeout (default 15). |
+| `sharing_consent` | `false` until you accept the sharing dialog; no stats are uploaded while it is false. |
+| `timeout_seconds` | HTTP timeout (default 60, long enough for a sleeping server to wake). |
 | `debug_logging` | Write a redacted rotating log to `addon/user_files/ankihelper.log`. |
 
 ### Tools menu
