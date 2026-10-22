@@ -39,13 +39,14 @@ class TokenStore:
         """Write atomically; True if written. Failures are logged, not raised: the in-memory session still works."""
         tmp = self._path.with_name(self._path.name + ".tmp")
         try:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump({"refresh_token": refresh_token, "base_url": base_url}, f)
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp, self._path)
+            self._sync_directory()
         except OSError as exc:
             log.info("could not save session file: %s", exc)
             try:
@@ -54,6 +55,22 @@ class TokenStore:
                 pass
             return False
         return True
+
+    def _sync_directory(self) -> None:
+        """Make the rename durable. Best effort: the token is already written, and
+        Windows cannot open a directory."""
+        if os.name == "nt":
+            return
+        try:
+            fd = os.open(self._path.parent, os.O_RDONLY)
+        except OSError:
+            return
+        try:
+            os.fsync(fd)
+        except OSError:
+            pass
+        finally:
+            os.close(fd)
 
     def clear(self) -> None:
         try:

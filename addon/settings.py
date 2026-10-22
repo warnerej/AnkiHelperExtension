@@ -46,14 +46,16 @@ class Settings:
         config = config or {}
         base_url = str(config.get("base_url") or "").strip().rstrip("/")
         if not base_url:
-            raise NotConfiguredError(
-                "AnkiHelper: set base_url in Tools > Add-ons > Config."
-            )
+            raise NotConfiguredError("Set base_url in Tools > Add-ons > Config.")
         parsed = urlparse(base_url)
         if parsed.scheme not in ("http", "https") or not parsed.hostname:
-            raise NotConfiguredError("AnkiHelper: base_url must be a full URL.")
+            raise NotConfiguredError("base_url must be a full URL.")
+        if parsed.username is not None or parsed.password is not None:
+            raise NotConfiguredError(
+                "base_url must not contain a username or password."
+            )
         if parsed.scheme == "http" and parsed.hostname not in _LOCAL_HOSTS:
-            raise NotConfiguredError("AnkiHelper: base_url must use https.")
+            raise NotConfiguredError("base_url must use https.")
         try:
             timeout = float(config.get("timeout_seconds", DEFAULT_TIMEOUT))
         except (TypeError, ValueError):

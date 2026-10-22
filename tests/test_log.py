@@ -37,3 +37,16 @@ def test_logs_never_contain_secrets(tmp_path, backend, make_client):
     assert "GET /auth/me -> 200" in text
     for secret in ("access1", "refresh1", "pw-secret"):
         assert secret not in text
+
+
+def test_stack_info_is_scrubbed_and_the_record_is_not_mutated(tmp_path):
+    from addon.log import RedactingFormatter
+
+    record = logging.LogRecord(
+        "ankihelper", logging.INFO, __file__, 1, "token=%s", ("t",), None
+    )
+    record.stack_info = "frame: Authorization: Bearer leaky.token"
+    line = RedactingFormatter("%(message)s").format(record)
+    assert "leaky.token" not in line
+    assert record.stack_info == "frame: Authorization: Bearer leaky.token"
+    assert record.args == ("t",)

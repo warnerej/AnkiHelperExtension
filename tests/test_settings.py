@@ -10,6 +10,8 @@ from addon.settings import Settings, strip_friends, strip_legacy_credentials
         {},
         {"base_url": "http://example.com"},
         {"base_url": "ftp://x"},
+        {"base_url": "https://user:pw@example.com"},
+        {"base_url": "https://user@example.com"},
     ],
 )
 def test_settings_validation(config):

@@ -22,17 +22,12 @@ def redact(text: str) -> str:
     return text
 
 
-class RedactionFilter(logging.Filter):
-    def filter(self, record: logging.LogRecord) -> bool:
-        record.msg = redact(record.getMessage())
-        record.args = None
-        if record.exc_info:
-            # Render and scrub the traceback so tokens in exception text can't leak.
-            record.exc_text = redact(
-                logging.Formatter().formatException(record.exc_info)
-            )
-            record.exc_info = None
-        return True
+class RedactingFormatter(logging.Formatter):
+    """Scrubs the finished line, so the message, traceback and stack_info are all
+    covered and the record itself is left untouched for other handlers."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        return redact(super().format(record))
 
 
 def get_logger() -> logging.Logger:
@@ -51,7 +46,6 @@ def setup_logging(log_dir: Path, debug: bool = False) -> logging.Logger:
     handler = RotatingFileHandler(
         log_dir / "ankihelper.log", maxBytes=256 * 1024, backupCount=2, encoding="utf-8"
     )
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-    handler.addFilter(RedactionFilter())
+    handler.setFormatter(RedactingFormatter("%(asctime)s %(levelname)s %(message)s"))
     logger.addHandler(handler)
     return logger

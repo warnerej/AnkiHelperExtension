@@ -209,7 +209,7 @@ class Controller:
 
     def _show_friends_removed_note(self) -> None:
         showInfo(
-            "AnkiHelper: the `friends` setting is no longer used and has been "
+            "The `friends` setting is no longer used and has been "
             "removed. Sharing now works through groups: create or join one from "
             "Tools > AnkiHelper > Groups.",
             title="AnkiHelper",

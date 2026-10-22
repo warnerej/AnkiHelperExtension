@@ -53,6 +53,21 @@ def test_file_is_private(path):
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permissions")
+def test_directory_is_private(path):
+    TokenStore(path).save("r1", URL)
+    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+
+
+@pytest.mark.skipif(os.name == "nt", reason="no directory fsync on Windows")
+def test_directory_is_synced_after_replace(path, monkeypatch):
+    synced: list[int] = []
+    real_fsync = os.fsync
+    monkeypatch.setattr(os, "fsync", lambda fd: (synced.append(fd), real_fsync(fd)))
+    TokenStore(path).save("r1", URL)
+    assert len(synced) == 2  # the file, then its directory
+
+
 def test_failed_replace_keeps_old_token_and_no_temp(path, monkeypatch):
     store = TokenStore(path)
     store.save("old", URL)
