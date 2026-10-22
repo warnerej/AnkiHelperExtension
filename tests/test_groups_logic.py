@@ -24,18 +24,13 @@ def make_group(*, owner_view: bool) -> Group:
 def test_owner_controls():
     c = gl.detail_controls(make_group(owner_view=True))
     assert not c.leave
-    assert all([c.invite_code, c.allowed, c.rename, c.transfer, c.delete])
+    assert c.invite_code
 
 
 def test_member_controls():
     c = gl.detail_controls(make_group(owner_view=False))
     assert c.leave
-    assert not any([c.invite_code, c.allowed, c.rename, c.transfer, c.delete])
-
-
-def test_is_owner_role():
-    assert gl.is_owner_role("owner")
-    assert not gl.is_owner_role("member")
+    assert not c.invite_code
 
 
 def test_group_name_validation():

@@ -1,4 +1,4 @@
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from html import escape
@@ -15,10 +15,6 @@ class HeatmapCell:
     study_minutes: float | None = None
     has_data: bool = False
     level: int = 0
-
-    @property
-    def lit(self) -> bool:
-        return self.total_reviews > 0
 
 
 def build_grid(profile: YearReviews) -> list[list[HeatmapCell | None]]:
@@ -181,12 +177,12 @@ def _colour_vars() -> str:
 _CSS = (
     """
 <style>
-.ah-friends { margin: 1.2em auto 0; text-align: left; display: inline-block; max-width: 100%; }
+.ah-group { margin: 1.2em auto 0; text-align: left; display: inline-block; max-width: 100%; }
 .ah-bar { margin-bottom: 1em; }
 .ah-toggle { padding: 4px 14px; margin-right: 6px; border: 1px solid #888; border-radius: 3px;
   background: transparent; color: inherit; cursor: pointer; }
 .ah-toggle.ah-active { background: #44a340; border-color: #44a340; color: #fff; }
-.ah-friend { margin-bottom: 1.6em; }
+.ah-member { margin-bottom: 1.6em; }
 .ah-scroll { overflow-x: auto; max-width: 100%; }
 .ah-name { font-weight: bold; margin-bottom: 6px; font-size: 14px; }
 .ah-svg text { font: 11px sans-serif; fill: #888; }
@@ -293,25 +289,13 @@ def render_stats_html(stats: HeatmapStats) -> str:
     )
 
 
-def _render_profile(name: str, profile: YearReviews | None, label: str = "") -> str:
+def _render_profile(name: str, profile: YearReviews, label: str = "") -> str:
     title = escape(label or name)
-    if profile is None:
-        title = f"{escape(name)} (user not found)"
-        body = ""
-    else:
-        grid = _with_levels(build_grid(profile), legend_for(profile))
-        body = f'<div class="ah-scroll">{render_grid_html(grid)}</div>' + (
-            render_stats_html(compute_stats(profile))
-        )
-    return f'<div class="ah-friend"><div class="ah-name">{title}</div>{body}</div>'
-
-
-def render_members_html(members: Mapping[str, YearReviews | None]) -> str:
-    """HTML block of one heatmap per name; empty when there are none."""
-    if not members:
-        return ""
-    blocks = [_render_profile(name, profile) for name, profile in members.items()]
-    return f'{_CSS}<div class="ah-friends">{"".join(blocks)}</div>{_JS}'
+    grid = _with_levels(build_grid(profile), legend_for(profile))
+    body = f'<div class="ah-scroll">{render_grid_html(grid)}</div>' + (
+        render_stats_html(compute_stats(profile))
+    )
+    return f'<div class="ah-member"><div class="ah-name">{title}</div>{body}</div>'
 
 
 def _picker(groups: Sequence[GroupSummary], selected: str | None) -> str:
@@ -395,4 +379,4 @@ def render_heatmap_html(
         f'<div class="ah-bar">{button("mine", "My stats")}'
         f"{button('groups', 'Groups')}{manage}</div>"
     )
-    return f'{_CSS}<div class="ah-friends">{bar}{body}</div>{_JS}'
+    return f'{_CSS}<div class="ah-group">{bar}{body}</div>{_JS}'

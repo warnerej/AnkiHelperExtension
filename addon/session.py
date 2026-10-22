@@ -83,10 +83,6 @@ class Session:
         self._issued_at = 0.0
         self._disk_stale = False  # last save failed: the file holds a spent token
 
-    @property
-    def is_logged_in(self) -> bool:
-        return self._access is not None
-
     def has_fresh_token(self) -> bool:
         """True if the access token is valid beyond the refresh margin."""
         return (

@@ -9,7 +9,6 @@ from .errors import AnkiHelperError, ApiError, NetworkError
 from .models import Group
 from .settings import USERNAME_RE
 
-OWNER = "owner"
 MAX_GROUP_NAME = 50
 
 JOIN_CONFIRMATION = (
@@ -24,10 +23,6 @@ STALE_HINT = (
     "The request may or may not have reached the server. The list has been "
     "refreshed; check it before trying again."
 )
-
-
-def is_owner_role(role: str) -> bool:
-    return role == OWNER
 
 
 def validate_group_name(raw: str) -> tuple[str, str | None]:
@@ -58,10 +53,6 @@ def validate_username(raw: str) -> tuple[str, str | None]:
 class DetailControls:
     leave: bool
     invite_code: bool
-    allowed: bool
-    rename: bool
-    transfer: bool
-    delete: bool
 
 
 def detail_controls(group: Group) -> DetailControls:
@@ -70,10 +61,6 @@ def detail_controls(group: Group) -> DetailControls:
     return DetailControls(
         leave=not owner,
         invite_code=owner,
-        allowed=owner,
-        rename=owner,
-        transfer=owner,
-        delete=owner,
     )
 
 

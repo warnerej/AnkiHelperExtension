@@ -8,7 +8,6 @@ from addon.heatmap import (
     legend_for,
     level_for,
     render_heatmap_html,
-    render_members_html,
 )
 from addon.models import (
     GroupReviews,
@@ -17,6 +16,10 @@ from addon.models import (
     ReviewDay,
     YearReviews,
 )
+
+
+def render_mine(p: YearReviews) -> str:
+    return render_heatmap_html(p, [], None, None, "mine")
 
 
 def profile(days: list[ReviewDay]) -> YearReviews:
@@ -43,17 +46,6 @@ def test_padding_before_start():
     assert grid[0][2] is not None and grid[0][2].day == date(2026, 9, 16)
 
 
-def test_lit_only_with_reviews():
-    days = [
-        ReviewDay(study_date=date(2026, 9, 14), total_reviews=5),
-        ReviewDay(study_date=date(2026, 9, 15), total_reviews=0),
-    ]
-    grid = build_grid(profile(days))
-    assert grid[0][0] is not None and grid[0][0].lit
-    assert grid[0][1] is not None and not grid[0][1].lit
-    assert grid[0][2] is not None and not grid[0][2].lit
-
-
 def test_tooltip():
     cell = HeatmapCell(date(2026, 10, 5), 42, 91.0, 18.5, has_data=True)
     assert format_tooltip(cell) == (
@@ -70,8 +62,8 @@ def test_tooltip_missing_values_and_no_reviews():
 
 def test_html_is_chronological_with_name_and_tooltips():
     days = [ReviewDay(study_date=date(2026, 9, 14), total_reviews=5, retention=90)]
-    html = render_members_html({"bob": profile(days), "ghost": None})
-    assert html.index(">bob<") < html.index("ghost (user not found)")
+    html = render_mine(profile(days))
+    assert ">My stats</div>" in html
     first = html.index("Mon 14 Sep")
     last = html.index("Tue 13 Oct")
     assert first < last
@@ -81,7 +73,7 @@ def test_html_is_chronological_with_name_and_tooltips():
 
 
 def test_svg_labels_and_colours():
-    html = render_members_html({"bob": profile([])})
+    html = render_mine(profile([]))
     assert html.count('x="0" y=') == 7
     assert ">Sep<" in html and ">Oct<" in html
     assert "ah-today" not in html
@@ -112,9 +104,11 @@ def test_compute_stats():
 
 
 def test_html_escapes_and_empty():
-    assert render_members_html({}) == ""
-    p = YearReviews(username="x", start=date(2026, 9, 14), end=date(2026, 9, 14))
-    assert "<b>" not in render_members_html({"<b>": p})
+    p = YearReviews(username="<b>", start=date(2026, 9, 14), end=date(2026, 9, 14))
+    groups = [GroupSummary("g1", "<i>x</i>", "owner", 1)]
+    html = render_heatmap_html(None, groups, "g1", None, "groups")
+    assert "<i>x</i>" not in html
+    assert "<b>" not in render_mine(p)
 
 
 def test_year_window():
@@ -127,7 +121,7 @@ def test_year_window():
     )
     grid = build_grid(p)
     assert len(grid) == 52
-    html = render_members_html({"bob": p})
+    html = render_mine(p)
     assert "Jan &#x27;26" in html or "Jan '26" in html
     assert 'class="ah-scroll"' in html
     assert compute_stats(p).learned_percent == 0
@@ -159,7 +153,7 @@ def test_heatmap_toggle_views():
     other = render_heatmap_html(
         mine, [G1], "g1", group(("bob", 1), ("al", 2)), "groups"
     )
-    assert "bob</div>" in other and "al</div>" in other and "ah-friend" in other
+    assert "bob</div>" in other and "al</div>" in other and "ah-member" in other
     assert "Group total" in other
     assert "ah-toggle" in render_heatmap_html(None, [], None, None, "mine")
 
@@ -195,4 +189,4 @@ def test_heatmap_groups_status_states():
     loaded = render_heatmap_html(
         None, [G1], "g1", group(("bob", 1), ("al", 1)), "groups"
     )
-    assert "ah-friend" in loaded
+    assert "ah-member" in loaded

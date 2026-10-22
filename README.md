@@ -12,7 +12,7 @@ An Anki add-on that turns private study stats into a shared, social progress vie
 
 | My stats | Groups |
 | --- | --- |
-| ![My heatmap](docs/images/heatmap-mine.png) | ![Groups heatmap](docs/images/heatmap-friends.png) |
+| ![My heatmap](docs/images/heatmap-mine.png) | ![Groups heatmap](docs/images/heatmap-groups.png) |
 
 ## How it works
 
