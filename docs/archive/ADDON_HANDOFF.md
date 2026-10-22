@@ -1,3 +1,5 @@
+> **Archived 2026-10-22.** Done: the add-on uses these endpoints. Endpoint detail lives in the backend repo's `docs/API_GUIDE.md`; open items are in `ROADMAP.md`.
+
 # Handoff: backend → Anki add-on
 
 ## Context

@@ -1,3 +1,5 @@
+> **Archived 2026-10-22.** Items 1-4 done. Item 5 (confirming the root cause of the logouts) is open and tracked in `ROADMAP.md`.
+
 # Refresh/logout follow-ups (handoff for the next agent)
 
 ## Background

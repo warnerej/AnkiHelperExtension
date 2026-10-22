@@ -1,3 +1,5 @@
+> **Archived 2026-10-22.** Done: automatic backfill, 7-day catch-up and manual re-upload shipped (`history_backfill.py`). Smoke tests are in `ROADMAP.md`.
+
 # AnkiHelper add-on: review history backfill
 
 Handoff for Claude Code, for the **add-on repo** (`AnkiHelperExtension`). Work through the tasks **in order** and stop for review after each one.

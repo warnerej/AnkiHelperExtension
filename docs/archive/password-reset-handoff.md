@@ -1,3 +1,5 @@
+> **Archived 2026-10-22.** Add-on side done (Forgot password? button); backend done (migration 0009). Only the site page remains, tracked in the backend repo's `ROADMAP.md`.
+
 # Password reset: backend and site handoff
 
 The add-on side is done (`Session.forgot_password`, the "Forgot password?" button in the login dialog). These two pieces live in other repos.

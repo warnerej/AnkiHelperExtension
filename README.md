@@ -8,6 +8,10 @@ An Anki add-on that turns private study stats into a shared, social progress vie
 
 > Backend: https://github.com/warnerej/AnkiHelper (separate repository). The add-on needs a running backend to sync.
 
+## Install
+
+Install from AnkiWeb (listing link to be added once published), or build `dist/ankihelper.ankiaddon` with `scripts/package.sh` and use Tools > Add-ons > Install from file. Requires Anki 26.5 or newer (Python 3.13). Restart Anki, then open Tools > AnkiHelper to sign up or log in. You are asked for consent to share before anything is uploaded; change your mind any time under Tools > AnkiHelper > Sharing. Tools > AnkiHelper > Delete account permanently removes your server-side data.
+
 ## Screenshots
 
 | My stats | Groups |
@@ -30,6 +34,8 @@ flowchart LR
     E -->|deck_browser_will_render_content| F[Deck browser]
 ```
 
+**Consent.** Sharing is opt-in. `consent_logic.py` holds the wording and the pure checks (`has_consent`, `with_consent`); the `sharing_consent` config key starts `false`. `ui.py` asks after login or signup and on a manual push or re-upload, and gates the daily push (including the final push when the profile closes), the history backfill and the re-upload on it. Opting out stops uploads but does not delete server data; Delete account does.
+
 **Daily push.** `stats.today_stats` reads the `revlog` table through Anki's collection API and computes review count, true retention (share of review-type answers that were not "Again") and study minutes. The study day follows Anki's "next day starts at" rollover (`col.sched.day_cutoff`) rather than midnight, and is dated from noon to avoid DST errors. `PUT /reviews/daily` sends the running total for the day, so it is an idempotent upsert and safe to repeat. Pushes fire after answering cards (throttled to once per 5 minutes), after a sync, when the profile closes (skipped if that would need a token refresh; the next start pushes it), or manually from the Tools menu.
 
 **Review history.** The daily push only covers today, so the add-on also uploads past days with `PUT /reviews/history` (which replaces the date range). It uploads your past year automatically the first time (after the first AnkiWeb sync of the session, never from a collection with no reviews), and after each sync catches up the last week so reviews done on your phone show up. "Re-upload review history..." in the Tools menu redoes the year on demand. The decisions are in `history_logic.py` and the sequencing in `history_backfill.py` (both tested without Anki).
@@ -46,13 +52,13 @@ flowchart LR
 - **Resilient HTTP.** GET and PUT retry on network errors and 5xx with jittered exponential backoff; POST is never retried. Errors map to a typed hierarchy (`errors.py`: `AuthError`, `NetworkError`, `ServerError`, `ApiError`, …).
 - **Validated boundaries.** Responses are parsed into typed frozen dataclasses (`from_dict`, stdlib only); settings are validated up front (https required except for localhost, username format).
 - **Secrets handled carefully.** The password is never written to disk (only a rotating refresh token, in a private file), a logging filter redacts bearer tokens and credentials (and is tested), and the config holds no secrets. The add-on talks only to the AnkiHelper API, never to Supabase directly.
-- **Testable design.** Logic lives in pure modules (`stats`, `heatmap`, `group_loader`, `group_state`, `groups_logic`, `account_state`, `session`, `token_store`); only the Qt modules (`ui.py`, `dialogs.py`, `groups_dialog.py`) import `aqt`, and `addon/__init__.py` skips UI setup when Anki is absent so tests run in plain Python.
+- **Testable design.** Logic lives in pure modules (`stats`, `heatmap`, `consent_logic`, `group_loader`, `group_state`, `groups_logic`, `account_state`, `session`, `token_store`); only the Qt modules (`ui.py`, `dialogs.py`, `groups_dialog.py`) import `aqt`, and `addon/__init__.py` skips UI setup when Anki is absent so tests run in plain Python.
 - **Matches Anki's runtime.** Python is pinned to 3.13 to match Anki's bundled interpreter, and the one runtime dependency (`httpx`, pure Python) is vendored since Anki does not provide it.
 
 ## Setup
 
-1. Copy `addon/config.example.json` to `addon/config.json` (git-ignored).
-2. Edit `addon/config.json` (options below).
+1. Copy `addon/config.example.json` to `addon/config.json` (git-ignored, so local changes never get committed). The example already points at the production backend; use `http://localhost:8000` to test against a local one. `scripts/package.sh` ignores your `config.json` and ships the example as the default config.
+2. Edit `addon/config.json` if needed (options below).
 3. Install the vendored dependencies (versions pinned by `uv.lock`): `uv export --no-dev --no-hashes --no-emit-project | uv pip install --target addon/vendor --python 3.13 -r -`. Everything vendored is pure Python, so it works on any OS.
 4. With Anki closed, link (or copy) `addon/` into Anki's add-ons folder as `ankihelper`. To find the folder, use Tools > Add-ons > View Files.
 
@@ -77,8 +83,10 @@ flowchart LR
 
 - **Log in**: email and password dialog; keeps only the refresh token.
 - **Sign up**: email, username and password dialog; calls `POST /auth/signup`.
+- **Forgot password?** (button in the Log in dialog): `POST /auth/forgot-password`; shows the same message whether or not the account exists.
 - **Log out**: `POST /auth/logout`, then deletes the stored token.
 - **Delete account...**: shows what is lost, asks you to type your account email (looked up with `GET /auth/me`) and your password, then calls `DELETE /auth/me`. A wrong password keeps the account. On success the stored token is deleted and the Groups tab is reset.
+- **Sharing**: toggles `sharing_consent`; turning it on shows the consent dialog.
 - **Test connection**: calls `GET /auth/me` with the current session.
 - **Push today's reviews**: `PUT /reviews/daily` (also runs automatically).
 - **Re-upload review history...**: replaces the last year on the server with this computer's data, after a confirmation (typing `upload` if there are no reviews in the year). Errors are shown.
@@ -102,7 +110,7 @@ flowchart LR
 
 ```sh
 uv sync
-uv run pytest        # 269 tests
+uv run pytest
 uv run ruff check .
 uv run pyright
 scripts/package.sh   # builds dist/ankihelper.ankiaddon
@@ -119,6 +127,7 @@ addon/
   __init__.py        entry point; adds vendor/ to sys.path, sets up UI inside Anki
   ui.py              menus, hooks, background tasks (with the dialogs, the only code importing aqt)
   account_state.py   pure login state, last-push memory and per-account reset
+  consent_logic.py   sharing-consent wording and pure checks
   dialogs.py         credentials, delete-account and empty-upload dialogs (Qt)
   api_client.py      HTTP client: retries, 401 handling, endpoint methods
   session.py         tokens, login/refresh/logout, response checking
@@ -141,9 +150,9 @@ tests/               pytest suite with fake transport and temp Collection
 scripts/package.sh   builds the .ankiaddon
 ```
 
-## Limitations and next steps
+## Project status
 
-- CI: `.github/workflows/ci.yml` runs ruff (check + format), pyright, pytest and the package smoke test.
+CI (`.github/workflows/ci.yml`) runs ruff (check + format), pyright, pytest and the package smoke test. Open work is in `ROADMAP.md`; finished plans are in `docs/archive/`. The Qt modules have not been exercised by automated tests, so releases need the manual checks listed there. API reference: the backend repo's `docs/API_GUIDE.md`.
 
 ## License
 

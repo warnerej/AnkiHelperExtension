@@ -1,3 +1,5 @@
+> **Archived 2026-10-22.** Done: groups, Groups screen, group heatmaps and Delete account shipped. The unchecked live-Anki smoke tests moved to `ROADMAP.md`.
+
 # AnkiHelper add-on roadmap: groups and account deletion
 
 Handoff for Claude Code, for the **add-on repo** (`AnkiHelperExtension`). Work through the tasks **in order** and stop for review after each one.

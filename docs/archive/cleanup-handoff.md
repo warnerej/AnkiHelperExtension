@@ -1,3 +1,5 @@
+> **Archived 2026-10-22.** Mostly done: items 1-15 landed; the remaining live-Anki check is in `ROADMAP.md`. Test counts here are stale.
+
 # Cleanup handoff
 
 Written after a repo audit. Items 1-8 are done and committed on `master`
