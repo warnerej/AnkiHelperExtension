@@ -1,4 +1,10 @@
-from addon.errors import ApiError, AuthError, ClientClosedError, NetworkError, ServerError
+from addon.errors import (
+    ApiError,
+    AuthError,
+    ClientClosedError,
+    NetworkError,
+    ServerError,
+)
 from addon.group_state import (
     ERROR,
     IDLE,

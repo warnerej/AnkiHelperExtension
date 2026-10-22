@@ -393,6 +393,6 @@ def render_heatmap_html(
     )
     bar = (
         f'<div class="ah-bar">{button("mine", "My stats")}'
-        f'{button("groups", "Groups")}{manage}</div>'
+        f"{button('groups', 'Groups')}{manage}</div>"
     )
     return f'{_CSS}<div class="ah-friends">{bar}{body}</div>{_JS}'

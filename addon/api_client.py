@@ -62,7 +62,9 @@ def _parse[T](path: str, build: Callable[[], T]) -> T:
 def _history_error(exc: ApiError) -> Exception:
     """Map the history endpoints' 4xx errors to user-facing ones."""
     if exc.status_code == 404:
-        return FeatureUnavailableError("The server does not support history upload yet.")
+        return FeatureUnavailableError(
+            "The server does not support history upload yet."
+        )
     if exc.status_code == 429:
         return ApiError(429, "Uploaded too many times recently. Try again in an hour.")
     if exc.status_code == 422:
@@ -165,9 +167,7 @@ class ApiClient:
         if stats.retention is not None:
             body["retention"] = stats.retention
         try:
-            return DailyReview.from_dict(
-                self.put("/reviews/daily", json=body).json()
-            )
+            return DailyReview.from_dict(self.put("/reviews/daily", json=body).json())
         except ValueError as exc:
             raise ServerError("Unexpected response from /reviews/daily") from exc
 
@@ -214,7 +214,12 @@ class ApiClient:
 
     def list_groups(self) -> list[GroupSummary]:
         path = "/groups"
-        return _parse(path, lambda: [GroupSummary.from_dict(g) for g in _as_list(self.get(path).json())])
+        return _parse(
+            path,
+            lambda: [
+                GroupSummary.from_dict(g) for g in _as_list(self.get(path).json())
+            ],
+        )
 
     def get_group(self, group_id: str) -> Group:
         """Group detail; `invite_code` and `allowed` are set only for the owner."""
@@ -222,11 +227,16 @@ class ApiClient:
         return _parse(path, lambda: Group.from_dict(self.get(path).json()))
 
     def create_group(self, name: str) -> Group:
-        return _parse("/groups", lambda: Group.from_dict(self.post("/groups", json={"name": name}).json()))
+        return _parse(
+            "/groups",
+            lambda: Group.from_dict(self.post("/groups", json={"name": name}).json()),
+        )
 
     def rename_group(self, group_id: str, name: str) -> Group:
         path = _group_path(group_id)
-        return _parse(path, lambda: Group.from_dict(self.patch(path, json={"name": name}).json()))
+        return _parse(
+            path, lambda: Group.from_dict(self.patch(path, json={"name": name}).json())
+        )
 
     def delete_group(self, group_id: str) -> None:
         self.delete(_group_path(group_id))
@@ -264,15 +274,24 @@ class ApiClient:
 
     def regenerate_invite_code(self, group_id: str) -> str:
         path = f"{_group_path(group_id)}/invite-code"
-        return _parse(path, lambda: InviteCode.from_dict(self.post(path).json()).invite_code)
+        return _parse(
+            path, lambda: InviteCode.from_dict(self.post(path).json()).invite_code
+        )
 
     def transfer_ownership(self, group_id: str, username: str) -> None:
         self.post(f"{_group_path(group_id)}/transfer", json={"username": username})
 
-    def get_group_reviews(self, group_id: str, days: int = HEATMAP_DAYS) -> GroupReviews:
+    def get_group_reviews(
+        self, group_id: str, days: int = HEATMAP_DAYS
+    ) -> GroupReviews:
         """Every joined member's review rows for the past `days` days."""
         path = f"{_group_path(group_id)}/reviews"
-        return _parse(path, lambda: GroupReviews.from_dict(self.get(path, params={"days": days}).json()))
+        return _parse(
+            path,
+            lambda: GroupReviews.from_dict(
+                self.get(path, params={"days": days}).json()
+            ),
+        )
 
     def login(self, email: str, password: str) -> None:
         """Log in and persist the refresh token (never retried; password not kept)."""
@@ -305,9 +324,7 @@ class ApiClient:
         Irreversible and carries the password, so it is never retried.
         """
         try:
-            self.request(
-                "DELETE", "/auth/me", json={"password": password}, retries=0
-            )
+            self.request("DELETE", "/auth/me", json={"password": password}, retries=0)
         except ApiError as exc:
             if exc.status_code == 403:
                 raise ApiError(403, "Wrong password.") from None

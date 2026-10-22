@@ -37,7 +37,13 @@ from .history_logic import (
     typed_confirmation_ok,
 )
 from .log import get_logger, setup_logging
-from .models import DailyReview, HistoryResult, SignupResponse, UserResponse, YearReviews
+from .models import (
+    DailyReview,
+    HistoryResult,
+    SignupResponse,
+    UserResponse,
+    YearReviews,
+)
 from .reset_logic import RESET_SENT_MESSAGE, validate_reset_email
 from .settings import USERNAME_RE, Settings, strip_friends, strip_legacy_credentials
 from .stats import YEAR_DAYS, TodayStats, today_stats, year_stats
@@ -382,7 +388,9 @@ class Controller:
                 self.log_in()
         except AnkiHelperError as exc:
             log.info("session restore failed: %s", exc)  # e.g. offline; retried on use
-            self._logged_in = True  # a stored session exists; backfill retries after sync
+            self._logged_in = (
+                True  # a stored session exists; backfill retries after sync
+            )
         except Exception:
             log.exception("unexpected error restoring session")
         else:

@@ -13,7 +13,9 @@ class AuthError(AnkiHelperError):
 class NotLoggedInError(AuthError):
     """No usable session: never logged in, logged out, or the stored token was rejected."""
 
-    def __init__(self, message: str = "Not logged in. Use Tools > AnkiHelper > Log in.") -> None:
+    def __init__(
+        self, message: str = "Not logged in. Use Tools > AnkiHelper > Log in."
+    ) -> None:
         super().__init__(message)
 
 

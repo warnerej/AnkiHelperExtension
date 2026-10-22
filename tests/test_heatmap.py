@@ -139,7 +139,9 @@ def group(*members: tuple[str, int]) -> GroupReviews:
         date(2026, 1, 1),
         date(2026, 1, 31),
         [
-            MemberReviews(name, [ReviewDay(study_date=date(2026, 1, 5), total_reviews=n)])
+            MemberReviews(
+                name, [ReviewDay(study_date=date(2026, 1, 5), total_reviews=n)]
+            )
             for name, n in members
         ],
     )
@@ -154,7 +156,9 @@ def test_heatmap_toggle_views():
     own = render_heatmap_html(mine, [G1], "g1", group(("bob", 1), ("al", 2)), "mine")
     assert "My stats" in own and "bob</div>" not in own
     assert "ankihelper:view:groups" in own
-    other = render_heatmap_html(mine, [G1], "g1", group(("bob", 1), ("al", 2)), "groups")
+    other = render_heatmap_html(
+        mine, [G1], "g1", group(("bob", 1), ("al", 2)), "groups"
+    )
     assert "bob</div>" in other and "al</div>" in other and "ah-friend" in other
     assert "Group total" in other
     assert "ah-toggle" in render_heatmap_html(None, [], None, None, "mine")
@@ -188,5 +192,7 @@ def test_heatmap_groups_status_states():
     assert "Loading groups" in loading
     error = render_heatmap_html(None, [], None, None, "groups", "error")
     assert "Retry" in error
-    loaded = render_heatmap_html(None, [G1], "g1", group(("bob", 1), ("al", 1)), "groups")
+    loaded = render_heatmap_html(
+        None, [G1], "g1", group(("bob", 1), ("al", 1)), "groups"
+    )
     assert "ah-friend" in loaded

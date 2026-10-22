@@ -23,11 +23,13 @@ testpaths = ["tests"]
 
 [tool.ruff]
 target-version = "py313"
-line-length = 120
+line-length = 88
 extend-exclude = ["addon/vendor"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+# The formatter owns line wrapping; it cannot split long strings or docstrings.
+ignore = ["E501"]
 
 [tool.pyright]
 include = ["addon", "tests"]

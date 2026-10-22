@@ -14,7 +14,12 @@ from addon.models import (
 )
 
 TOKENS = {"access_token": "a", "refresh_token": "r", "expires_in": 60}
-DAY = {"study_date": "2026-01-02", "total_reviews": 5, "retention": 0.9, "study_minutes": 12}
+DAY = {
+    "study_date": "2026-01-02",
+    "total_reviews": 5,
+    "retention": 0.9,
+    "study_minutes": 12,
+}
 DAILY = {**DAY, "updated_at": "2026-01-02T10:00:00+00:00"}
 
 
@@ -24,7 +29,9 @@ class TestTokenResponse:
         assert (t.access_token, t.refresh_token, t.expires_in) == ("a", "r", 60)
 
     def test_extra_keys_and_default(self):
-        t = TokenResponse.from_dict({"access_token": "a", "refresh_token": "r", "token_type": "bearer"})
+        t = TokenResponse.from_dict(
+            {"access_token": "a", "refresh_token": "r", "token_type": "bearer"}
+        )
         assert t.expires_in == 3600
 
     @pytest.mark.parametrize("key", ["access_token", "refresh_token"])
@@ -33,7 +40,13 @@ class TestTokenResponse:
             TokenResponse.from_dict({k: v for k, v in TOKENS.items() if k != key})
 
     @pytest.mark.parametrize(
-        "patch", [{"access_token": 1}, {"expires_in": "60"}, {"expires_in": True}, {"expires_in": 1.5}]
+        "patch",
+        [
+            {"access_token": 1},
+            {"expires_in": "60"},
+            {"expires_in": True},
+            {"expires_in": 1.5},
+        ],
     )
     def test_bad_types(self, patch):
         with pytest.raises(ValueError):
@@ -73,7 +86,12 @@ class TestDailyReview:
 
     def test_extra_keys_and_optionals(self):
         r = DailyReview.from_dict(
-            {"study_date": "2026-01-02", "total_reviews": 0, "updated_at": "2026-01-02T10:00:00Z", "id": "x"}
+            {
+                "study_date": "2026-01-02",
+                "total_reviews": 0,
+                "updated_at": "2026-01-02T10:00:00Z",
+                "id": "x",
+            }
         )
         assert r.retention is None and r.study_minutes is None
 
@@ -100,8 +118,19 @@ class TestDailyReview:
 
 class TestSignupResponse:
     def test_with_tokens(self):
-        s = SignupResponse.from_dict({"user": {"id": "1"}, "tokens": TOKENS, "confirmation_required": True, "x": 1})
-        assert s.user.id == "1" and s.tokens == TokenResponse("a", "r", 60) and s.confirmation_required
+        s = SignupResponse.from_dict(
+            {
+                "user": {"id": "1"},
+                "tokens": TOKENS,
+                "confirmation_required": True,
+                "x": 1,
+            }
+        )
+        assert (
+            s.user.id == "1"
+            and s.tokens == TokenResponse("a", "r", 60)
+            and s.confirmation_required
+        )
 
     def test_defaults(self):
         s = SignupResponse.from_dict({"user": {}})
@@ -114,7 +143,12 @@ class TestSignupResponse:
 
     @pytest.mark.parametrize(
         "patch",
-        [{"user": "bob"}, {"tokens": {"access_token": "a"}}, {"tokens": "x"}, {"confirmation_required": "yes"}],
+        [
+            {"user": "bob"},
+            {"tokens": {"access_token": "a"}},
+            {"tokens": "x"},
+            {"confirmation_required": "yes"},
+        ],
     )
     def test_bad_types(self, patch):
         with pytest.raises(ValueError):
@@ -135,7 +169,10 @@ class TestReviewDay:
         with pytest.raises(ValueError, match=key):
             ReviewDay.from_dict({k: v for k, v in DAY.items() if k != key})
 
-    @pytest.mark.parametrize("patch", [{"study_date": "2026-13-45"}, {"total_reviews": 2.5}, {"retention": []}])
+    @pytest.mark.parametrize(
+        "patch",
+        [{"study_date": "2026-13-45"}, {"total_reviews": 2.5}, {"retention": []}],
+    )
     def test_bad_types(self, patch):
         with pytest.raises(ValueError):
             ReviewDay.from_dict({**DAY, **patch})
@@ -176,17 +213,30 @@ class TestHistory:
                 "history_synced_at": "2026-01-31T21:04:11+00:00",
             }
         )
-        assert (r.start, r.end, r.days_written) == (date(2025, 2, 1), date(2026, 1, 31), 213)
-        assert r.history_synced_at == datetime.fromisoformat("2026-01-31T21:04:11+00:00")
+        assert (r.start, r.end, r.days_written) == (
+            date(2025, 2, 1),
+            date(2026, 1, 31),
+            213,
+        )
+        assert r.history_synced_at == datetime.fromisoformat(
+            "2026-01-31T21:04:11+00:00"
+        )
 
     def test_result_missing_field(self):
         with pytest.raises(ValueError, match="days_written"):
             HistoryResult.from_dict(
-                {"start": "2025-02-01", "end": "2026-01-31", "history_synced_at": "2026-01-31T00:00:00Z"}
+                {
+                    "start": "2025-02-01",
+                    "end": "2026-01-31",
+                    "history_synced_at": "2026-01-31T00:00:00Z",
+                }
             )
 
     def test_status_null_and_set(self):
-        assert HistoryStatus.from_dict({"history_synced_at": None}).history_synced_at is None
+        assert (
+            HistoryStatus.from_dict({"history_synced_at": None}).history_synced_at
+            is None
+        )
         assert HistoryStatus.from_dict({}).history_synced_at is None
         s = HistoryStatus.from_dict({"history_synced_at": "2026-01-31T21:04:11+00:00"})
         assert s.history_synced_at is not None

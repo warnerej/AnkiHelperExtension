@@ -73,8 +73,12 @@ def test_manual_confirmation_both_notes():
 
 @pytest.mark.parametrize(("n", "unit"), [(213, "days"), (1, "day"), (0, "days")])
 def test_result_message(n, unit):
-    result = HistoryResult(date(2025, 2, 1), date(2026, 1, 31), n, datetime(2026, 1, 31))
-    assert result_message(result) == f"AnkiHelper: uploaded {n} {unit} of review history."
+    result = HistoryResult(
+        date(2025, 2, 1), date(2026, 1, 31), n, datetime(2026, 1, 31)
+    )
+    assert (
+        result_message(result) == f"AnkiHelper: uploaded {n} {unit} of review history."
+    )
 
 
 def test_today_row_matches_the_end_day():
@@ -89,14 +93,22 @@ def test_today_row_matches_the_end_day():
 
 
 def test_today_row_none_without_a_row_for_the_end_day():
-    h = YearReviews("you", date(2026, 1, 1), date(2026, 1, 3), [ReviewDay(date(2026, 1, 2), 9)])
+    h = YearReviews(
+        "you", date(2026, 1, 1), date(2026, 1, 3), [ReviewDay(date(2026, 1, 2), 9)]
+    )
     assert today_row(h) is None
     assert today_row(YearReviews("you", date(2026, 1, 1), date(2026, 1, 3))) is None
 
 
 @pytest.mark.parametrize(
     ("typed", "ok"),
-    [("upload", True), ("  Upload ", True), ("UPLOAD", True), ("", False), ("upload now", False)],
+    [
+        ("upload", True),
+        ("  Upload ", True),
+        ("UPLOAD", True),
+        ("", False),
+        ("upload now", False),
+    ],
 )
 def test_typed_confirmation_ok(typed, ok):
     assert typed_confirmation_ok(typed) is ok

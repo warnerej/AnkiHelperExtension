@@ -10,7 +10,9 @@ DELETE_WARNING = (
 )
 
 
-def validate_delete(expected_email: str | None, typed_email: str, password: str) -> str | None:
+def validate_delete(
+    expected_email: str | None, typed_email: str, password: str
+) -> str | None:
     """A problem message, or None when the deletion may go ahead."""
     if not expected_email:
         return "Could not look up your account email. Log in again and retry."

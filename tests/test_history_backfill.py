@@ -15,7 +15,10 @@ NEVER = HistoryStatus(None)
 DONE = HistoryStatus(datetime(2026, 1, 1))
 RESULT = HistoryResult(date(2025, 2, 1), TODAY, 2, datetime(2026, 1, 31))
 FULL = YearReviews(
-    "you", date(2025, 2, 1), TODAY, [ReviewDay(date(2026, 1, 30), 5), ReviewDay(TODAY, 3, 90.0, 4)]
+    "you",
+    date(2025, 2, 1),
+    TODAY,
+    [ReviewDay(date(2026, 1, 30), 5), ReviewDay(TODAY, 3, 90.0, 4)],
 )
 EMPTY = YearReviews("you", date(2025, 2, 1), TODAY)
 
@@ -151,7 +154,12 @@ def test_empty_year_is_not_uploaded_and_stays_pending():
 
 
 def test_errors_are_silent_and_leave_it_pending():
-    for exc in (FeatureUnavailableError("old"), NetworkError("x"), ServerError("y"), ValueError("z")):
+    for exc in (
+        FeatureUnavailableError("old"),
+        NetworkError("x"),
+        ServerError("y"),
+        ValueError("z"),
+    ):
         h = Harness(status=exc)
         h.backfill.maybe_run()
         h.run_jobs()

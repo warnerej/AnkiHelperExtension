@@ -50,7 +50,13 @@ def _obj(data: Any, model: str) -> dict[str, Any]:
     return data
 
 
-def _get[T](data: dict[str, Any], model: str, key: str, parse: Callable[[Any], T], default: Any = _MISSING) -> T:
+def _get[T](
+    data: dict[str, Any],
+    model: str,
+    key: str,
+    parse: Callable[[Any], T],
+    default: Any = _MISSING,
+) -> T:
     """Parse `data[key]`. A missing key uses `default`, or raises when there is none.
 
     An explicit null counts as missing for fields that have a default.
@@ -144,7 +150,9 @@ class HistoryStatus:
     def from_dict(cls, data: Any) -> Self:
         d = _obj(data, "HistoryStatus")
         return cls(
-            history_synced_at=_get(d, "HistoryStatus", "history_synced_at", _datetime, None)
+            history_synced_at=_get(
+                d, "HistoryStatus", "history_synced_at", _datetime, None
+            )
         )
 
 
@@ -160,7 +168,9 @@ class SignupResponse:
         return cls(
             user=_get(d, "SignupResponse", "user", UserResponse.from_dict),
             tokens=_get(d, "SignupResponse", "tokens", TokenResponse.from_dict, None),
-            confirmation_required=_get(d, "SignupResponse", "confirmation_required", _bool, False),
+            confirmation_required=_get(
+                d, "SignupResponse", "confirmation_required", _bool, False
+            ),
         )
 
 
@@ -253,7 +263,8 @@ class Group:
             id=_get(d, "Group", "id", _str),
             name=_get(d, "Group", "name", _str),
             owner=_get(d, "Group", "owner", _str, None),
-            members=_get(d, "Group", "members", _list(GroupMember.from_dict), None) or [],
+            members=_get(d, "Group", "members", _list(GroupMember.from_dict), None)
+            or [],
             invite_code=_get(d, "Group", "invite_code", _str, None),
             allowed=_get(d, "Group", "allowed", _list(_str), None),
         )
@@ -279,7 +290,8 @@ class MemberReviews:
         d = _obj(data, "MemberReviews")
         return cls(
             username=_get(d, "MemberReviews", "username", _str),
-            days=_get(d, "MemberReviews", "days", _list(ReviewDay.from_dict), None) or [],
+            days=_get(d, "MemberReviews", "days", _list(ReviewDay.from_dict), None)
+            or [],
         )
 
 
@@ -297,7 +309,10 @@ class GroupReviews:
             group_id=_get(d, "GroupReviews", "group_id", _str),
             start=_get(d, "GroupReviews", "start", _date),
             end=_get(d, "GroupReviews", "end", _date),
-            members=_get(d, "GroupReviews", "members", _list(MemberReviews.from_dict), None) or [],
+            members=_get(
+                d, "GroupReviews", "members", _list(MemberReviews.from_dict), None
+            )
+            or [],
         )
 
     def year_for(self, member: MemberReviews) -> YearReviews:
@@ -309,11 +324,12 @@ class GroupReviews:
         minutes: dict[date, float] = {}
         for member in self.members:
             for day in member.days:
-                reviews[day.study_date] = reviews.get(day.study_date, 0) + day.total_reviews
+                reviews[day.study_date] = (
+                    reviews.get(day.study_date, 0) + day.total_reviews
+                )
                 if day.study_minutes is not None:
-                    minutes[day.study_date] = minutes.get(day.study_date, 0.0) + day.study_minutes
-        days = [
-            ReviewDay(d, reviews[d], None, minutes.get(d))
-            for d in sorted(reviews)
-        ]
+                    minutes[day.study_date] = (
+                        minutes.get(day.study_date, 0.0) + day.study_minutes
+                    )
+        days = [ReviewDay(d, reviews[d], None, minutes.get(d)) for d in sorted(reviews)]
         return YearReviews(username, self.start, self.end, days)

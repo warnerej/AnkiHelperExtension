@@ -83,7 +83,9 @@ def test_refresh_sends_newer_token_from_disk(backend, make_client, store):
     assert store.load("http://localhost:8000") == "refresh3"
 
 
-def test_refresh_uses_memory_token_after_failed_save(backend, make_client, store, monkeypatch):
+def test_refresh_uses_memory_token_after_failed_save(
+    backend, make_client, store, monkeypatch
+):
     backend.on("POST", "/auth/login", (200, tokens(1)))
     backend.on("POST", "/auth/refresh", (200, tokens(3)))
     backend.on("GET", "/auth/me", (401, {}), ME)
@@ -93,7 +95,9 @@ def test_refresh_uses_memory_token_after_failed_save(backend, make_client, store
     real_save("spent", "http://localhost:8000")  # stale file from an earlier rotation
     client.get_me()
     assert backend.body(2) == {"refresh_token": "refresh1"}
-    assert store.load("http://localhost:8000") == "spent"  # rotated token never reached disk
+    assert (
+        store.load("http://localhost:8000") == "spent"
+    )  # rotated token never reached disk
 
 
 def test_refresh_5xx_keeps_stored_session(backend, make_client, store):
@@ -144,9 +148,7 @@ def test_concurrent_401s_trigger_one_refresh(backend, make_client, store):
     from addon.api_client import ApiClient
 
     settings = Settings("http://localhost:8000", 5)
-    client = ApiClient(
-        lambda: settings, store, transport=httpx.MockTransport(handler)
-    )
+    client = ApiClient(lambda: settings, store, transport=httpx.MockTransport(handler))
     client.login("a@b.c", "pw")  # everyone starts with access1
     errors: list[Exception] = []
 
@@ -304,7 +306,9 @@ def test_login_persists_only_refresh_token(backend, make_client, store):
 
 def test_each_refresh_rewrites_rotated_token(backend, make_client, store):
     backend.on("POST", "/auth/login", (200, tokens(1, expires_in=30)))
-    backend.on("POST", "/auth/refresh", (200, tokens(2, expires_in=30)), (200, tokens(3)))
+    backend.on(
+        "POST", "/auth/refresh", (200, tokens(2, expires_in=30)), (200, tokens(3))
+    )
     backend.on("GET", "/auth/me", ME)
     client = make_client()
     client.get_me()
@@ -374,7 +378,12 @@ def test_settings_ok_needs_only_base_url():
 
 
 def test_strip_legacy_credentials():
-    config = {"base_url": "https://x.io", "email": "a", "password": "p", "username": "u"}
+    config = {
+        "base_url": "https://x.io",
+        "email": "a",
+        "password": "p",
+        "username": "u",
+    }
     cleaned, had_password = strip_legacy_credentials(config)
     assert cleaned == {"base_url": "https://x.io"} and had_password
     assert config["password"] == "p"  # input untouched
@@ -505,7 +514,9 @@ GROUP = {
     "id": "g1",
     "name": "Study",
     "owner": "bob",
-    "members": [{"username": "bob", "role": "owner", "joined_at": "2026-01-01T00:00:00Z"}],
+    "members": [
+        {"username": "bob", "role": "owner", "joined_at": "2026-01-01T00:00:00Z"}
+    ],
 }
 OWNER_GROUP = {**GROUP, "invite_code": "ABC123", "allowed": ["bob", "amy"]}
 
@@ -603,7 +614,10 @@ def test_get_group_reviews(backend, make_client):
                 "start": "2026-01-01",
                 "end": "2026-01-02",
                 "members": [
-                    {"username": "bob", "days": [{"study_date": "2026-01-02", "total_reviews": 5}]},
+                    {
+                        "username": "bob",
+                        "days": [{"study_date": "2026-01-02", "total_reviews": 5}],
+                    },
                     {"username": "amy", "days": []},
                 ],
             },
@@ -611,7 +625,10 @@ def test_get_group_reviews(backend, make_client):
     )
     result = make_client().get_group_reviews("g1")
     assert backend.calls[1].url.params["days"] == "365"
-    assert [(m.username, len(m.days)) for m in result.members] == [("bob", 1), ("amy", 0)]
+    assert [(m.username, len(m.days)) for m in result.members] == [
+        ("bob", 1),
+        ("amy", 0),
+    ]
 
 
 def test_group_get_and_delete_retry_but_post_patch_do_not(backend, make_client):
@@ -787,12 +804,17 @@ def test_upload_history_maps_429_422_404(backend, make_client):
 def test_get_history_status(backend, make_client):
     logged_in(backend)
     backend.on(
-        "GET", STATUS_PATH, (200, {"history_synced_at": None}), (200, {"history_synced_at": None})
+        "GET",
+        STATUS_PATH,
+        (200, {"history_synced_at": None}),
+        (200, {"history_synced_at": None}),
     )
     client = make_client()
     assert client.get_history_status().history_synced_at is None
     assert backend.calls[1].headers["Authorization"] == "Bearer access1"
-    backend.on("GET", STATUS_PATH, (200, {"history_synced_at": "2026-01-31T21:04:11+00:00"}))
+    backend.on(
+        "GET", STATUS_PATH, (200, {"history_synced_at": "2026-01-31T21:04:11+00:00"})
+    )
     assert client.get_history_status().history_synced_at is not None
 
 
@@ -849,7 +871,9 @@ def test_refresh_rejected_for_disk_token_clears_store(backend, make_client, stor
     assert store.load("http://localhost:8000") is None
 
 
-def test_refresh_rejection_logs_unknown_age_after_restore(backend, make_client, store, caplog):
+def test_refresh_rejection_logs_unknown_age_after_restore(
+    backend, make_client, store, caplog
+):
     store.save("saved", "http://localhost:8000")
     backend.on("POST", "/auth/refresh", (401, {"detail": "used"}))
     with caplog.at_level("INFO", logger="ankihelper"), pytest.raises(NotLoggedInError):

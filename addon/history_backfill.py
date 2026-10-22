@@ -46,7 +46,9 @@ class HistoryBackfiller:
         self._uses_sync = uses_sync  # is AnkiWeb sync set up for this profile?
         self._synced = synced_this_session
         self._fetch_status = fetch_status
-        self._read_year = read_year  # (days, success, failure): collection read via QueryOp
+        self._read_year = (
+            read_year  # (days, success, failure): collection read via QueryOp
+        )
         self._upload = upload
         self._run_in_background = run_in_background
         self._notify = notify
@@ -148,7 +150,10 @@ class HistoryBackfiller:
         mark the account as backfilled with just a week of data).
         """
         now = self._clock()
-        if self._last_upload is not None and now - self._last_upload < CATCH_UP_MIN_SECONDS:
+        if (
+            self._last_upload is not None
+            and now - self._last_upload < CATCH_UP_MIN_SECONDS
+        ):
             return
         self._inflight = True
         generation = self._generation

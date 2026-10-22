@@ -132,7 +132,9 @@ class Session:
             self._post("/auth/forgot-password", json={"email": email})
         except ApiError as exc:
             if exc.status_code == 429:
-                raise ApiError(429, "Too many reset requests. Try again later.") from exc
+                raise ApiError(
+                    429, "Too many reset requests. Try again later."
+                ) from exc
             if exc.status_code == 422:
                 raise ApiError(422, "Enter a valid email address.") from exc
             raise
@@ -180,7 +182,9 @@ class Session:
         self._refresh = tokens.refresh_token
         self._issued_at = self._clock()
         self._expires_at = self._issued_at + tokens.expires_in
-        self._disk_stale = not self._store_file.save(tokens.refresh_token, self._base_url)
+        self._disk_stale = not self._store_file.save(
+            tokens.refresh_token, self._base_url
+        )
 
     def _store(self, resp: httpx.Response) -> None:
         try:
@@ -216,7 +220,11 @@ class Session:
             )
         except AuthError as exc:
             # Rejected or already-used refresh token: the user has to log in again.
-            age = f"{round(self._clock() - self._issued_at)} s" if self._issued_at else "unknown (restored from disk)"
+            age = (
+                f"{round(self._clock() - self._issued_at)} s"
+                if self._issued_at
+                else "unknown (restored from disk)"
+            )
             log.info("refresh rejected (%s); token age %s", exc, age)
             self._clear()
             self._store_file.clear()

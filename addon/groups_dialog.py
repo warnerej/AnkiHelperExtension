@@ -141,7 +141,9 @@ class GroupsDialog(QDialog):
             except Exception as exc:
                 if not isinstance(exc, AnkiHelperError):
                     log.exception("unexpected error in groups dialog")
-                showWarning(gl.error_message(exc, mutation=mutation), title=TITLE, parent=self)
+                showWarning(
+                    gl.error_message(exc, mutation=mutation), title=TITLE, parent=self
+                )
                 if refresh_after_failure and gl.needs_refresh(exc):
                     self.reload()
                 return
@@ -151,7 +153,9 @@ class GroupsDialog(QDialog):
 
     def reload(self, select_id: str | None = None) -> None:
         keep = select_id or (self._group.id if self._group else None)
-        self._call(self._client.list_groups, lambda groups: self._fill_list(groups, keep))
+        self._call(
+            self._client.list_groups, lambda groups: self._fill_list(groups, keep)
+        )
 
     def _fill_list(self, groups: list[GroupSummary], select_id: str | None) -> None:
         self._list.blockSignals(True)
@@ -246,7 +250,9 @@ class GroupsDialog(QDialog):
 
     def _leave_group(self) -> None:
         group = self._group
-        if group is None or not askUser(gl.LEAVE_CONFIRMATION, parent=self, title=TITLE):
+        if group is None or not askUser(
+            gl.LEAVE_CONFIRMATION, parent=self, title=TITLE
+        ):
             return
         self._call(
             lambda: self._client.leave_group(group.id),
@@ -368,7 +374,9 @@ class GroupsDialog(QDialog):
         if typed is None:
             return
         if not gl.delete_confirmed(group, typed):
-            return self._invalid("That didn't match the group name; nothing was deleted.")
+            return self._invalid(
+                "That didn't match the group name; nothing was deleted."
+            )
         self._call(
             lambda: self._client.delete_group(group.id),
             lambda _: self._after_removal(),
