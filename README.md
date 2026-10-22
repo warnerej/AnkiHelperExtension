@@ -40,9 +40,9 @@ flowchart LR
 
 - **UI never blocks.** All network calls run through `mw.taskman.run_in_background`; workers use a config snapshot and never touch `mw`.
 - **Resilient HTTP.** GET and PUT retry on network errors and 5xx with jittered exponential backoff; POST is never retried. Errors map to a typed hierarchy (`errors.py`: `AuthError`, `NetworkError`, `ServerError`, `ApiError`, …).
-- **Validated boundaries.** Responses are parsed into typed frozen dataclasses (`from_dict`, stdlib only); settings are validated up front (https required except for localhost, username format, username format).
+- **Validated boundaries.** Responses are parsed into typed frozen dataclasses (`from_dict`, stdlib only); settings are validated up front (https required except for localhost, username format).
 - **Secrets handled carefully.** The password is never written to disk (only a rotating refresh token, in a private file), a logging filter redacts bearer tokens and credentials (and is tested), and the config holds no secrets. The add-on talks only to the AnkiHelper API, never to Supabase directly.
-- **Testable design.** Logic lives in pure modules (`stats`, `heatmap`, `group_loader`, `group_state`, `groups_logic`, `session`, `token_store`); only `ui.py` imports `aqt`, and `addon/__init__.py` skips UI setup when Anki is absent so tests run in plain Python.
+- **Testable design.** Logic lives in pure modules (`stats`, `heatmap`, `group_loader`, `group_state`, `groups_logic`, `session`, `token_store`); only the Qt modules (`ui.py`, `dialogs.py`, `groups_dialog.py`) import `aqt`, and `addon/__init__.py` skips UI setup when Anki is absent so tests run in plain Python.
 - **Matches Anki's runtime.** Python is pinned to 3.13 to match Anki's bundled interpreter, and the one runtime dependency (`httpx`, pure Python) is vendored since Anki does not provide it.
 
 ## Setup
@@ -97,13 +97,13 @@ flowchart LR
 
 ```sh
 uv sync
-uv run pytest        # 223 tests
+uv run pytest        # 251 tests
 uv run ruff check .
 uv run pyright
 scripts/package.sh   # builds dist/ankihelper.ankiaddon
 ```
 
-Tests use a scriptable `httpx.MockTransport` backend (no network) and a real temporary Anki `Collection` for the stats queries. They cover login/refresh/retry behaviour including concurrent 401s, request retry rules, the stats calculations, heatmap rendering, the group-loading state machine (`GroupLoader` with fake scheduling) and log redaction. `ui.py` is not unit-tested because it needs a running Qt/Anki.
+Tests use a scriptable `httpx.MockTransport` backend (no network) and a real temporary Anki `Collection` for the stats queries. They cover login/refresh/retry behaviour including concurrent 401s, request retry rules, the stats calculations, heatmap rendering, the group-loading state machine (`GroupLoader` with fake scheduling) and log redaction. The Qt modules (`ui.py`, `dialogs.py`, `groups_dialog.py`) are not unit-tested because they need a running Qt/Anki.
 
 Packaging note: the vendored dependencies are pure Python, so a `.ankiaddon` built on one OS works on macOS, Windows and Linux.
 
@@ -112,10 +112,12 @@ Packaging note: the vendored dependencies are pure Python, so a `.ankiaddon` bui
 ```
 addon/
   __init__.py        entry point; adds vendor/ to sys.path, sets up UI inside Anki
-  ui.py              menus, hooks, background tasks (only module importing aqt)
+  ui.py              menus, hooks, background tasks (with the dialogs, the only code importing aqt)
+  dialogs.py         credentials, delete-account and empty-upload dialogs (Qt)
   api_client.py      HTTP client: retries, 401 handling, endpoint methods
   session.py         tokens, login/refresh/logout, response checking
   delete_logic.py    pure checks for the Delete account dialog
+  reset_logic.py     pure checks for the Forgot password button
   token_store.py     refresh token file in user_files/ (atomic writes)
   stats.py           revlog -> daily and yearly stats
   heatmap.py         HTML/SVG/CSS/JS heatmap rendering

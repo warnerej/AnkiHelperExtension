@@ -27,20 +27,20 @@ Read `CLAUDE.md`, `README.md` and `API_GUIDE.md` first. Commands: `uv sync`, `uv
 
 | Task | Status |
 | --- | --- |
-| 1. Groups API client | **Done** (uncommitted at time of writing; 152 tests, ruff and pyright clean) |
-| 2. Groups screen | **Done** (uncommitted; 166 tests, ruff and pyright clean; dialog not exercised in a live Anki yet) |
-| 3. Group heatmaps | **Done** (uncommitted; 162 tests, ruff and pyright clean; not exercised in a live Anki yet) |
-| 4. Delete account | **Done** (uncommitted; 173 tests, ruff and pyright clean; dialog not exercised in a live Anki yet) |
-| 5. Release prep | **Next** |
-| Backfill 1. History client | **Done** (uncommitted; ruff and pyright clean) |
-| Backfill 2. Pure logic (`history_logic.py`) | **Done** (uncommitted) |
-| Backfill 3. Automatic backfill (`history_backfill.py`, wired in `ui.py`) | **Done** (uncommitted; Qt wiring not run in a live Anki) |
-| Backfill 4. Manual re-upload menu item | **Done** (uncommitted; not run in a live Anki) |
-| Backfill 5. Post-sync 7-day catch-up | **Done** (uncommitted; approved by user; only runs once the server already has history) |
+| 1. Groups API client | **Done** (committed) |
+| 2. Groups screen | **Done** (committed; dialog not exercised in a live Anki yet) |
+| 3. Group heatmaps | **Done** (committed; not exercised in a live Anki yet) |
+| 4. Delete account | **Done** (committed; dialog not exercised in a live Anki yet) |
+| 5. Release prep | **Next** (packaging and CI done; README screenshots, AnkiWeb listing and privacy policy remain) |
+| Backfill 1. History client | **Done** (committed) |
+| Backfill 2. Pure logic (`history_logic.py`) | **Done** (committed) |
+| Backfill 3. Automatic backfill (`history_backfill.py`, wired in `ui.py`) | **Done** (committed; Qt wiring not run in a live Anki) |
+| Backfill 4. Manual re-upload menu item | **Done** (committed; not run in a live Anki) |
+| Backfill 5. Post-sync 7-day catch-up | **Done** (committed; approved by user; only runs once the server already has history) |
 | Backfill 6. Docs | **Done** (`API_GUIDE.md`, `README.md`, `CLAUDE.md`) |
-| Backfill smoke test in a real Anki | **Pending** (see checklist below; 223 tests pass) |
+| Backfill smoke test in a real Anki | **Pending** (see checklist below) |
 
-Nothing from Tasks 1-3 is committed yet; the working tree holds all of it (tests: 162, ruff and pyright clean). None of the Qt code (`groups_dialog.py`, `ui.py`) has been exercised in a live Anki, so a manual smoke test is still owed.
+Tasks 1-4 and the backfill are committed. None of the Qt code (`groups_dialog.py`, `ui.py`) has been exercised in a live Anki, so a manual smoke test is still owed.
 
 ### Task 4 outcome
 
@@ -136,7 +136,7 @@ Keep the decision logic (what to show for owners versus members, input validatio
 
 ---
 
-## Task 4: Delete account (next)
+## Task 4: Delete account (done, kept for reference)
 
 - **Tools > AnkiHelper > Delete account…**, with a dialog that:
   - explains that the account, all review history and group memberships are deleted, and that owned groups pass to another member (or are deleted if empty),
