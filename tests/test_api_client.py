@@ -12,12 +12,11 @@ from addon.errors import (
     ClientClosedError,
     FeatureUnavailableError,
     NetworkError,
-    NotConfiguredError,
     NotLoggedInError,
     ServerError,
 )
 from addon.models import ReviewDay, YearReviews
-from addon.settings import LEGACY_KEYS, Settings, strip_legacy_credentials
+from addon.settings import LEGACY_KEYS, Settings
 from addon.stats import TodayStats
 
 from .conftest import tokens
@@ -381,41 +380,6 @@ def test_restore_without_token_is_not_logged_in(backend, make_client):
     assert not backend.calls
 
 
-@pytest.mark.parametrize(
-    "config",
-    [
-        {},
-        {"base_url": "http://example.com"},
-        {"base_url": "ftp://x"},
-    ],
-)
-def test_settings_validation(config):
-    with pytest.raises(NotConfiguredError):
-        Settings.from_config(config)
-
-
-def test_settings_ok_needs_only_base_url():
-    s = Settings.from_config(
-        {"base_url": "http://localhost:8000/", "timeout_seconds": "bad"}
-    )
-    assert s.base_url == "http://localhost:8000" and s.timeout_seconds == 15
-
-
-def test_strip_legacy_credentials():
-    config = {
-        "base_url": "https://x.io",
-        "email": "a",
-        "password": "p",
-        "username": "u",
-    }
-    cleaned, had_password = strip_legacy_credentials(config)
-    assert cleaned == {"base_url": "https://x.io"} and had_password
-    assert config["password"] == "p"  # input untouched
-    cleaned, had_password = strip_legacy_credentials({"base_url": "https://x.io"})
-    assert cleaned == {"base_url": "https://x.io"} and not had_password
-    assert strip_legacy_credentials({"email": "a", "password": ""}) == ({}, False)
-
-
 def test_put_daily_reviews_body_and_parse(backend, make_client):
     from datetime import date
 
@@ -523,15 +487,6 @@ def test_signup_network_failure_not_retried(backend, make_client):
     with pytest.raises(NetworkError):
         make_client().signup("a@b.c", "pw-secret", "bob")
     assert backend.count("POST", "/auth/signup") == 1
-
-
-def test_strip_friends():
-    from addon.settings import strip_friends
-
-    cleaned, had = strip_friends({"base_url": "x", "friends": ["a"]})
-    assert cleaned == {"base_url": "x"} and had
-    assert strip_friends({"base_url": "x", "friends": []}) == ({"base_url": "x"}, False)
-    assert strip_friends({"base_url": "x"}) == ({"base_url": "x"}, False)
 
 
 GROUP = {

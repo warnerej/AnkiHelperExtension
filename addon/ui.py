@@ -8,9 +8,10 @@ from aqt.operations import QueryOp
 from aqt.qt import QAction, QInputDialog, QMenu
 from aqt.utils import askUser, showInfo, showWarning, tooltip
 
+from .account_state import AccountState, restore_outcome
 from .api_client import ApiClient
 from .dialogs import CredentialsDialog, DeleteAccountDialog, EmptyUploadDialog, alive
-from .errors import AnkiHelperError, NetworkError, NotLoggedInError, ServerError
+from .errors import AnkiHelperError, NotLoggedInError
 from .group_loader import GroupLoader, load_snapshot
 from .groups_dialog import GroupsDialog
 from .heatmap import GROUP_CMD, GROUPS_CMD, RETRY_CMD, VIEW_CMD, render_heatmap_html
@@ -68,11 +69,10 @@ class Controller:
         self._config: dict[str, Any] = {}
         user_files = Path(__file__).parent / "user_files"
         self.client = ApiClient(self._settings, TokenStore(user_files / "session.json"))
-        self._logged_in = False
+        self.account = AccountState(on_reset=self._forget_account_data)
         self._closing = False
         self._synced_this_session = False
         self._reupload_inflight = False
-        self._last_pushed: TodayStats | None = None
         self._forgot_pending = False
         self._last_push_time = 0.0
         self._year_cache: tuple[float, YearReviews] | None = None
@@ -95,7 +95,7 @@ class Controller:
             warn=lambda message: showWarning(message, title="AnkiHelper"),
         )
         self.backfill = HistoryBackfiller(
-            is_logged_in=lambda: self._logged_in,
+            is_logged_in=lambda: self.account.logged_in,
             uses_sync=lambda: mw.pm.sync_auth() is not None,
             synced_this_session=lambda: self._synced_this_session,
             fetch_status=self.client.get_history_status,
@@ -106,7 +106,7 @@ class Controller:
             ),
             notify=tooltip,
             mark_groups_stale=self.groups.mark_stale,
-            set_last_pushed=self._set_last_pushed,
+            set_last_pushed=self.account.record_push,
         )
         self.reload_config()
         self._migrate_legacy_config()
@@ -131,7 +131,7 @@ class Controller:
 
     def reupload_history(self) -> None:
         """Menu action: replace the server's last year with this collection's data."""
-        if not self._logged_in:
+        if not self.account.logged_in:
             showInfo(str(NotLoggedInError()), title="AnkiHelper")
             return
         if self._reupload_inflight:
@@ -179,10 +179,7 @@ class Controller:
             self.groups.ensure()
         row = today_row(history)
         if row is not None:
-            self._set_last_pushed(row)
-
-    def _set_last_pushed(self, stats: TodayStats) -> None:
-        self._last_pushed = stats
+            self.account.record_push(row)
 
     def _save_selected_group(self, group_id: str) -> None:
         assert mw is not None
@@ -225,24 +222,19 @@ class Controller:
         try:
             future.result()
         except NotLoggedInError as exc:
-            self._logged_in = False
+            self.account.logged_in = restore_outcome(exc) is True
             log.info("no session restored: %s", exc)
             if "expired" in str(exc) and askUser(
                 f"{exc}\n\nLog in now?", title="AnkiHelper"
             ):
                 self.log_in()
-        except (NetworkError, ServerError) as exc:
-            log.info("session restore failed: %s", exc)  # offline; retried on use
-            self._logged_in = (
-                True  # a stored session exists; backfill retries after sync
-            )
         except AnkiHelperError as exc:
-            self._logged_in = False  # e.g. not configured or client closed: no session
-            log.info("session restore failed: %s", exc)
+            self.account.logged_in = restore_outcome(exc) is True
+            log.info("session restore failed: %s", exc)  # offline errors retry on use
         except Exception:
             log.exception("unexpected error restoring session")
         else:
-            self._logged_in = True
+            self.account.logged_in = True
             self.backfill.maybe_run()
 
     def open_groups(self) -> None:
@@ -312,14 +304,15 @@ class Controller:
         reading = self._read_today()
         if reading is None:
             return
-        if reading == self._last_pushed:
+        if reading == self.account.last_pushed:
             if manual:
                 tooltip("AnkiHelper: reviews already up to date")
             return
         self._last_push_time = time.monotonic()
+        generation = self.account.generation
         mw.taskman.run_in_background(
             lambda: self.client.put_daily_reviews(reading),
-            lambda future: self._on_push_result(future, reading, manual),
+            lambda future: self._on_push_result(future, reading, manual, generation),
         )
 
     def on_card_answered(self, *_args: Any) -> None:
@@ -342,11 +335,14 @@ class Controller:
         future: Future[DailyReview],
         reading: TodayStats,
         manual: bool,
+        generation: int,
     ) -> None:
         ok, saved = _settle(future, "review push", show=manual)
         if not ok or saved is None:
             return
-        self._last_pushed = reading
+        if not self.account.record_push(reading, generation):
+            log.info("discarding push result from a previous account")
+            return
         log.info("pushed %d reviews for %s", saved.total_reviews, saved.study_date)
         if manual:
             retention = (
@@ -486,8 +482,7 @@ class Controller:
         if not ok:
             return
         tooltip("AnkiHelper: logged in")
-        self._reset_account_state()
-        self._logged_in = True
+        self.account.start_session()
         self.push_today()
         self.backfill.maybe_run()
 
@@ -515,8 +510,7 @@ class Controller:
             )
         else:
             tooltip("AnkiHelper: account created and logged in")
-            self._reset_account_state()
-            self._logged_in = True
+            self.account.start_session()
             self.push_today()
             self.backfill.maybe_run()
 
@@ -524,7 +518,7 @@ class Controller:
         assert mw is not None
         if self._groups_dialog is not None:
             self._groups_dialog.close()
-        self._reset_account_state()
+        self.account.reset()
         mw.taskman.run_in_background(self.client.logout, self._on_logout_result)
 
     def _on_logout_result(self, future: Future[None]) -> None:
@@ -532,10 +526,7 @@ class Controller:
         if ok:
             tooltip("AnkiHelper: logged out")
 
-    def _reset_account_state(self) -> None:
-        """Forget everything tied to the previous account (logout, delete, new login)."""
-        self._last_pushed = None
-        self._logged_in = False
+    def _forget_account_data(self) -> None:
         self.backfill.reset()
         self.groups.reset()
 
@@ -562,7 +553,7 @@ class Controller:
             return
         if self._groups_dialog is not None:
             self._groups_dialog.close()
-        self._reset_account_state()
+        self.account.reset()
         tooltip("AnkiHelper: account deleted")
 
 

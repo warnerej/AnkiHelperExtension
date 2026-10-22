@@ -39,7 +39,7 @@ class HistoryBackfiller:
         run_in_background: Callable[[Callable[[], object], Callable], object],
         notify: Callable[[str], object],
         mark_groups_stale: Callable[[], None],
-        set_last_pushed: Callable[[TodayStats], None],
+        set_last_pushed: Callable[[TodayStats], object],
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._is_logged_in = is_logged_in
