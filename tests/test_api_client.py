@@ -71,6 +71,27 @@ def test_refresh_rejected_clears_store_and_needs_login(backend, make_client, sto
     assert store.load("http://localhost:8000") is None
 
 
+def test_refresh_sends_newer_token_from_disk(backend, make_client, store):
+    backend.on("POST", "/auth/login", (200, tokens(1)))
+    backend.on("POST", "/auth/refresh", (200, tokens(3)))
+    backend.on("GET", "/auth/me", (401, {}), ME)
+    client = make_client()
+    store.save("refresh-other", "http://localhost:8000")  # rotated by another process
+    client.get_me()
+    assert backend.count("POST", "/auth/refresh") == 1
+    assert backend.body(2) == {"refresh_token": "refresh-other"}
+    assert store.load("http://localhost:8000") == "refresh3"
+
+
+def test_refresh_5xx_keeps_stored_session(backend, make_client, store):
+    backend.on("POST", "/auth/login", (200, tokens(1)))
+    backend.on("POST", "/auth/refresh", (502, {"detail": "down"}))
+    backend.on("GET", "/auth/me", (401, {}))
+    with pytest.raises(ServerError):
+        make_client().get_me()
+    assert store.load("http://localhost:8000") == "refresh1"
+
+
 def test_second_401_raises_auth_error(backend, make_client):
     backend.on("POST", "/auth/login", (200, tokens(1)))
     backend.on("POST", "/auth/refresh", (200, tokens(2)))
@@ -771,3 +792,53 @@ def test_get_history_status_404_and_malformed(backend, make_client):
     backend.on("GET", STATUS_PATH, (200, {"history_synced_at": 5}))
     with pytest.raises(ServerError):
         client.get_history_status()
+
+
+def test_forgot_password_posts_email_without_bearer(backend, make_client):
+    backend.on("POST", "/auth/forgot-password", (202, {"detail": "ok"}))
+    make_client(login=False).forgot_password("a@b.c")
+    assert backend.body(0) == {"email": "a@b.c"}
+    assert "Authorization" not in backend.calls[0].headers
+
+
+def test_forgot_password_ignores_response_body(backend, make_client):
+    backend.on("POST", "/auth/forgot-password", (202, None))
+    make_client(login=False).forgot_password("nobody@b.c")
+
+
+@pytest.mark.parametrize(
+    "status, text",
+    [(429, "Too many reset requests"), (422, "valid email")],
+)
+def test_forgot_password_errors_not_retried(backend, make_client, status, text):
+    backend.on("POST", "/auth/forgot-password", (status, {"detail": "x"}))
+    with pytest.raises(ApiError, match=text):
+        make_client(login=False).forgot_password("a@b.c")
+    assert backend.count("POST", "/auth/forgot-password") == 1
+
+
+def test_forgot_password_network_failure_not_retried(backend, make_client):
+    backend.on("POST", "/auth/forgot-password", httpx.ConnectError("down"))
+    with pytest.raises(NetworkError):
+        make_client(login=False).forgot_password("a@b.c")
+    assert backend.count("POST", "/auth/forgot-password") == 1
+
+
+def test_refresh_rejected_for_disk_token_clears_store(backend, make_client, store):
+    backend.on("POST", "/auth/login", (200, tokens(1)))
+    backend.on("POST", "/auth/refresh", (401, {"detail": "used"}))
+    backend.on("GET", "/auth/me", (401, {}))
+    client = make_client()
+    store.save("refresh-other", "http://localhost:8000")
+    with pytest.raises(NotLoggedInError):
+        client.get_me()
+    assert backend.count("POST", "/auth/refresh") == 1
+    assert store.load("http://localhost:8000") is None
+
+
+def test_refresh_rejection_logs_unknown_age_after_restore(backend, make_client, store, caplog):
+    store.save("saved", "http://localhost:8000")
+    backend.on("POST", "/auth/refresh", (401, {"detail": "used"}))
+    with caplog.at_level("INFO", logger="ankihelper"), pytest.raises(NotLoggedInError):
+        make_client(login=False).get_me()
+    assert "unknown (restored from disk)" in caplog.text

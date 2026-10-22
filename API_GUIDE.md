@@ -4,7 +4,7 @@ Reference for the AnkiHelper backend API that the Anki add-on talks to. The back
 
 ## Endpoints
 
-All bodies and responses are JSON. Every endpoint except `/health`, `/auth/signup`, `/auth/login` and `/auth/refresh` needs the header `Authorization: Bearer <access_token>`.
+All bodies and responses are JSON. Every endpoint except `/health`, `/auth/signup`, `/auth/login`, `/auth/refresh` and `/auth/forgot-password` needs the header `Authorization: Bearer <access_token>`.
 
 | Method and path | Auth | Request | Success response |
 | --- | --- | --- | --- |
@@ -12,6 +12,7 @@ All bodies and responses are JSON. Every endpoint except `/health`, `/auth/signu
 | `POST /auth/signup` | no | `{email, password, username}` (password >= 8 chars; username 3-20 chars of letters, digits, `_`, stored lowercase; 409 if taken) | 201 `{user: {id, email}, tokens \| null, confirmation_required}` |
 | `POST /auth/login` | no | `{email, password}` | `{access_token, refresh_token, token_type, expires_in}` |
 | `POST /auth/refresh` | no | `{refresh_token}` | new `{access_token, refresh_token, token_type, expires_in}` |
+| `POST /auth/forgot-password` | no | `{email}` | 202 whether or not the email has an account (so it can't reveal who is registered); emails a reset link to the Kantanly site. Rate limited per IP and per email (429). The add-on never retries it |
 | `GET /auth/me` | yes | | `{id, email}` |
 | `POST /auth/logout` | yes | | 204, ends this session |
 | `DELETE /auth/me` | yes | `{password}` | 204; irreversible (deletes reviews and memberships; owned groups pass to the longest-standing member, or are deleted if empty); 403 for a wrong password. The add-on never retries it |
@@ -78,5 +79,6 @@ Authorization: Bearer <access_token>
 | --- | --- | --- |
 | 401 | missing, invalid or expired token | refresh once, retry once, else log in again |
 | 404 | no review row for that date | treat as "no data" |
+| 429 | rate limit hit (history upload, group join, forgot-password) | tell the user to try later; don't retry |
 | 422 | body or query failed validation (negative total, bad or missing date, short password) | fix the request, don't retry unchanged |
 | 502 | the database call failed | retry later with backoff |

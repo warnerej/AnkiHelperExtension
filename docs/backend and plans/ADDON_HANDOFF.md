@@ -9,9 +9,10 @@ The backend (`AnkiHelper` repo, branch `add-groups`) now supports groups and acc
 | 0. Leaked-secrets check | No record in the repo (not verified here). Confirm separately, rotate keys if needed. |
 | 1. Groups | Done (migrations 0004, 0005, 0006) |
 | 2. Account deletion | Done (migration 0007) |
-| 3. Website | Not started (no CORS, no site repo) |
+| 3. Website | Not started (no CORS, no site repo). Must include the password-reset page: see `password-reset-handoff.md` |
+| 4. Password reset | Add-on and backend (`POST /auth/forgot-password`, migration 0009) done; site page pending |
 
-Migrations 0001-0007 are applied by hand in Supabase, in order; the add-on needs them applied on the live project.
+Migrations 0001-0009 are applied by hand in Supabase, in order; the add-on needs them applied on the live project.
 
 ## Auth (unchanged, plus one endpoint)
 Login with email/password → `access_token`, `refresh_token`; send `Authorization: Bearer <token>`; 401 → `/auth/refresh` → relogin. Signup requires a `username` (3-20 chars: letters, digits, `_`; stored lowercase; 409 if taken).

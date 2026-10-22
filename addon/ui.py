@@ -1,4 +1,5 @@
 import time
+from collections.abc import Callable
 from concurrent.futures import Future
 from pathlib import Path
 from typing import Any
@@ -10,9 +11,12 @@ from aqt.qt import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMenu,
+    QPushButton,
+    Qt,
     QVBoxLayout,
 )
 from aqt.utils import askUser, showInfo, showWarning, tooltip
@@ -34,6 +38,7 @@ from .history_logic import (
 )
 from .log import get_logger, setup_logging
 from .models import DailyReview, HistoryResult, SignupResponse, UserResponse, YearReviews
+from .reset_logic import RESET_SENT_MESSAGE, validate_reset_email
 from .settings import USERNAME_RE, Settings, strip_friends, strip_legacy_credentials
 from .stats import YEAR_DAYS, TodayStats, today_stats, year_stats
 from .token_store import TokenStore
@@ -46,10 +51,18 @@ PUSH_THROTTLE_SECONDS = 300
 class CredentialsDialog(QDialog):
     """Email + password, plus a username when signing up. Validates before accepting."""
 
-    def __init__(self, parent: Any, title: str, *, signup: bool) -> None:
+    def __init__(
+        self,
+        parent: Any,
+        title: str,
+        *,
+        signup: bool,
+        on_forgot: Callable[[str, Any], None] | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle(title)
         self._signup = signup
+        self._forgot: QPushButton | None = None
         self.email = QLineEdit()
         self.username = QLineEdit()
         self.password = QLineEdit()
@@ -70,7 +83,20 @@ class CredentialsDialog(QDialog):
             layout.addWidget(
                 _hint("Username: 3-20 letters, digits or _. Password: 8+ characters.")
             )
+        if on_forgot is not None and not signup:
+            self._forgot = QPushButton("Forgot password?")
+            self._forgot.setFlat(True)
+            self._forgot.setAutoDefault(False)
+            self._forgot.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._forgot.clicked.connect(
+                lambda: on_forgot(self.email.text().strip(), self)
+            )
+            layout.addWidget(self._forgot, alignment=Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(buttons)
+
+    def set_forgot_enabled(self, enabled: bool) -> None:
+        if self._forgot is not None:
+            self._forgot.setEnabled(enabled)
 
     def _validate(self) -> None:
         problem = None
@@ -160,6 +186,15 @@ def _hint(text: str) -> QLabel:
     return label
 
 
+def _alive(widget: Any) -> bool:
+    """False once Qt has deleted the widget's C++ object (e.g. the dialog was closed)."""
+    try:
+        widget.isVisible()
+    except RuntimeError:
+        return False
+    return True
+
+
 def _unexpected(what: str) -> None:
     log.exception("unexpected error during %s", what)
     showWarning("Unexpected error. See user_files/ankihelper.log.", title="AnkiHelper")
@@ -178,6 +213,7 @@ class Controller:
         user_files = Path(__file__).parent / "user_files"
         self.client = ApiClient(self._settings, TokenStore(user_files / "session.json"))
         self._last_pushed: TodayStats | None = None
+        self._forgot_pending = False
         self._last_push_time = 0.0
         self.view = "mine"
         self._groups_dialog: GroupsDialog | None = None
@@ -541,7 +577,9 @@ class Controller:
     def log_in(self) -> None:
         assert mw is not None
         self.reload_config()
-        dialog = CredentialsDialog(mw, "AnkiHelper: Log in", signup=False)
+        dialog = CredentialsDialog(
+            mw, "AnkiHelper: Log in", signup=False, on_forgot=self.forgot_password
+        )
         if not dialog.exec():
             return
         email, password = dialog.email.text().strip(), dialog.password.text()
@@ -549,6 +587,47 @@ class Controller:
         mw.taskman.run_in_background(
             lambda: self.client.login(email, password), self._on_login_result
         )
+
+    def forgot_password(self, prefill_email: str, parent: Any) -> None:
+        if self._forgot_pending:
+            return
+        email, ok = QInputDialog.getText(
+            parent,
+            "AnkiHelper: Reset password",
+            "Email for the account to reset:",
+            text=prefill_email,
+        )
+        if not ok:
+            return
+        email = email.strip()
+        problem = validate_reset_email(email)
+        if problem:
+            showWarning(problem, title="AnkiHelper", parent=parent)
+            return
+        assert mw is not None
+        self._forgot_pending = True
+        parent.set_forgot_enabled(False)
+        mw.taskman.run_in_background(
+            lambda: self.client.forgot_password(email),
+            lambda future: self._on_forgot_result(future, parent),
+        )
+
+    def _on_forgot_result(self, future: Future[None], parent: Any) -> None:
+        self._forgot_pending = False
+        if _alive(parent):
+            parent.set_forgot_enabled(True)
+        else:
+            parent = mw
+        try:
+            future.result()
+        except AnkiHelperError as exc:
+            log.info("password reset request failed: %s", exc)
+            showWarning(str(exc), title="AnkiHelper", parent=parent)
+            return
+        except Exception:
+            _unexpected("password reset")
+            return
+        showInfo(RESET_SENT_MESSAGE, title="AnkiHelper", parent=parent)
 
     def _on_login_result(self, future: Future[None]) -> None:
         try:

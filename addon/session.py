@@ -51,7 +51,7 @@ class Session:
         http: httpx.Client,
         store: TokenStore,
         base_url: str,
-        clock: Callable[[], float] = time.monotonic,
+        clock: Callable[[], float] = time.time,
     ) -> None:
         self._http = http
         self._store_file = store
@@ -61,6 +61,7 @@ class Session:
         self._access: str | None = None
         self._refresh: str | None = None
         self._expires_at = 0.0
+        self._issued_at = 0.0
 
     @property
     def is_logged_in(self) -> bool:
@@ -124,6 +125,18 @@ class Session:
         log.info("signed up (confirmation_required=%s)", result.confirmation_required)
         return result
 
+    def forgot_password(self, email: str) -> None:
+        """Ask the server to email a reset link. The response never says if the account exists."""
+        try:
+            self._post("/auth/forgot-password", json={"email": email})
+        except ApiError as exc:
+            if exc.status_code == 429:
+                raise ApiError(429, "Too many reset requests. Try again later.") from exc
+            if exc.status_code == 422:
+                raise ApiError(422, "Enter a valid email address.") from exc
+            raise
+        log.info("password reset requested")
+
     def logout(self) -> None:
         """Best-effort server logout, then always clear local state and the stored token."""
         with self._lock:
@@ -153,6 +166,7 @@ class Session:
         self._access = None
         self._refresh = None
         self._expires_at = 0.0
+        self._issued_at = 0.0
 
     def adopt_tokens(self, tokens: TokenResponse) -> None:
         """Use tokens obtained elsewhere (e.g. signup) as the current session."""
@@ -162,7 +176,8 @@ class Session:
     def _set_tokens(self, tokens: TokenResponse) -> None:
         self._access = tokens.access_token
         self._refresh = tokens.refresh_token
-        self._expires_at = self._clock() + tokens.expires_in
+        self._issued_at = self._clock()
+        self._expires_at = self._issued_at + tokens.expires_in
         self._store_file.save(tokens.refresh_token, self._base_url)
 
     def _store(self, resp: httpx.Response) -> None:
@@ -181,9 +196,9 @@ class Session:
         self._refresh_session()
 
     def _refresh_session(self) -> None:
-        refresh_token = self._refresh
-        if refresh_token is None:
-            refresh_token = self._store_file.load(self._base_url)
+        # Prefer the file: another Anki process may have rotated the token since we
+        # loaded it, and sending a spent token would make the server revoke the session.
+        refresh_token = self._store_file.load(self._base_url) or self._refresh
         self._access = None
         if refresh_token is None:
             self._clear()
@@ -194,7 +209,8 @@ class Session:
             )
         except AuthError as exc:
             # Rejected or already-used refresh token: the user has to log in again.
-            log.info("refresh rejected (%s)", exc)
+            age = f"{round(self._clock() - self._issued_at)} s" if self._issued_at else "unknown (restored from disk)"
+            log.info("refresh rejected (%s); token age %s", exc, age)
             self._clear()
             self._store_file.clear()
             raise NotLoggedInError(

@@ -2,7 +2,7 @@
 
 Anki add-on (client) for AnkiHelper. It reads study stats from the local Anki collection, pushes them to the AnkiHelper FastAPI backend (Supabase-backed), and pulls stats back to display progress for the user and others. Endpoint reference: `API_GUIDE.md`; overview and setup: `README.md`.
 
-**Status:** backend has auth (`/auth/signup|login|refresh|me|logout`, `DELETE /auth/me`), daily reviews (`PUT/GET /reviews/daily`, `GET /reviews/daily/{date}`) and groups (`list_groups`, `join_group`, `get_group_reviews`, ... on `ApiClient`). The add-on implements login/logout dialogs, signup, Delete account (confirm by typing the account email plus the password; never retried), stored-refresh-token session restore, daily push, the Groups screen (Tools > AnkiHelper > Groups...) and the Groups tab on the deck browser (picker remembered in `selected_group`, one `get_group_reviews` call per group). It also uploads review history: an automatic once-per-account 365-day backfill (guarded: waits for the first AnkiWeb sync, never uploads an empty year), a 7-day catch-up after each sync, and a manual Tools > AnkiHelper > Re-upload review history... (`PUT /reviews/history`, `GET /reviews/history/status`). The old per-user friends fetch and `friends` config are gone.
+**Status:** backend has auth (`/auth/signup|login|refresh|me|logout`, `DELETE /auth/me`), daily reviews (`PUT/GET /reviews/daily`, `GET /reviews/daily/{date}`) and groups (`list_groups`, `join_group`, `get_group_reviews`, ... on `ApiClient`). The add-on implements login/logout dialogs, signup, a "Forgot password?" button in the login dialog (`POST /auth/forgot-password`, never retried, same generic message either way), Delete account (confirm by typing the account email plus the password; never retried), stored-refresh-token session restore, daily push, the Groups screen (Tools > AnkiHelper > Groups...) and the Groups tab on the deck browser (picker remembered in `selected_group`, one `get_group_reviews` call per group). It also uploads review history: an automatic once-per-account 365-day backfill (guarded: waits for the first AnkiWeb sync, never uploads an empty year), a 7-day catch-up after each sync, and a manual Tools > AnkiHelper > Re-upload review history... (`PUT /reviews/history`, `GET /reviews/history/status`). The old per-user friends fetch and `friends` config are gone.
 
 ## Environment
 - `uv` project. Python is pinned to **3.13** because Anki bundles its own interpreter (not 3.14). Verify against the installed Anki (Help > About) before changing.
@@ -15,7 +15,7 @@ Anki add-on (client) for AnkiHelper. It reads study stats from the local Anki co
   - `__init__.py` (entry; sets up `vendor/` path, calls `ui.setup()` inside Anki), `ui.py` (`Controller`: menus, hooks, daily push, signup)
   - `groups_logic.py` (pure Groups-screen decisions: validation, owner/member controls, messages) + `groups_dialog.py` (Qt dialog, opened by `Controller.open_groups`)
   - `history_logic.py` (pure history-upload decisions) + `history_backfill.py` (backfill/catch-up sequencing, Anki bits injected),
-  - `delete_logic.py` (pure Delete-account checks), `group_loader.py` + `group_state.py` (groups fetch/retry state machine, with Anki bits injected; pure decisions)
+  - `delete_logic.py` (pure Delete-account checks), `reset_logic.py` (pure forgot-password checks), `group_loader.py` + `group_state.py` (groups fetch/retry state machine, with Anki bits injected; pure decisions)
   - `api_client.py` (endpoints, retries), `session.py` (tokens, login/refresh/logout), `token_store.py` (refresh token file in `user_files/`), `settings.py`, `models.py`, `errors.py`, `log.py`
   - `stats.py` (revlog -> stats), `heatmap.py` (HTML/SVG rendering)
   - `config.example.json`, `config.md`, `manifest.json`, `vendor/` (git-ignored, built by packaging)
@@ -25,7 +25,7 @@ Anki add-on (client) for AnkiHelper. It reads study stats from the local Anki co
 ## Auth flow the client implements
 1. User logs in via Tools > AnkiHelper (dialog): `POST /auth/login` -> `access_token`, `refresh_token`, `expires_in` (3600s). The password is never stored.
 2. Access token in memory only; the refresh token is persisted atomically to `user_files/session.json` after every rotation and restored on startup. Send `Authorization: Bearer <access_token>`.
-3. On 401: `POST /auth/refresh`, retry once. If refresh is rejected, clear the file and ask the user to log in (no silent re-login). Logout calls `POST /auth/logout` and deletes the file.
+3. On 401: `POST /auth/refresh` (sending the token currently in `session.json`, since another Anki process may have rotated it), retry once. Token expiry uses wall-clock `time.time` (`monotonic` stops during macOS sleep). If refresh is rejected, clear the file and ask the user to log in (no silent re-login). Logout calls `POST /auth/logout` and deletes the file.
 4. Refresh tokens rotate and are single use. Never refresh before every call.
 
 ## Conventions

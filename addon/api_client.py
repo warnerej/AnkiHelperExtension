@@ -286,6 +286,10 @@ class ApiClient:
         """Create an account (no bearer token, never retried)."""
         return self._ensure_session().signup(email, password, username)
 
+    def forgot_password(self, email: str) -> None:
+        """Request a password reset email (no bearer token, never retried)."""
+        self._ensure_session().forgot_password(email)
+
     def logout(self) -> None:
         """End the server session (best effort) and delete the stored token."""
         try:
