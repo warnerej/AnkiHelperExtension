@@ -24,6 +24,7 @@ from aqt.utils import askUser, showWarning, tooltip
 
 from . import groups_logic as gl
 from .api_client import ApiClient
+from .dialogs import alive
 from .errors import AnkiHelperError
 from .log import get_logger
 from .models import Group, GroupSummary
@@ -47,6 +48,7 @@ class GroupsDialog(QDialog):
         self._client = client
         self._run = run_in_background
         self._group: Group | None = None
+        self._roles: dict[str, str] = {}  # group id -> the viewer's role
         self._busy = False
 
         self._list = QListWidget()
@@ -129,12 +131,16 @@ class GroupsDialog(QDialog):
     ) -> None:
         """Run `work` off-thread with the dialog disabled; `done` gets the result."""
         if self._busy:
+            log.info("groups dialog: ignoring a request made while one is running")
             return
         self._busy = True
         self.setEnabled(False)
 
         def finished(future: Future) -> None:
             self._busy = False
+            if not alive(self):
+                log.info("groups dialog closed before its request finished")
+                return
             self.setEnabled(True)
             try:
                 result = future.result()
@@ -158,7 +164,8 @@ class GroupsDialog(QDialog):
         )
 
     def _fill_list(self, groups: list[GroupSummary], select_id: str | None) -> None:
-        self._list.blockSignals(True)
+        self._roles = {g.id: g.role for g in groups}
+        self._list.blockSignals(True)  # one explicit load below, not one per signal
         self._list.clear()
         row_to_select = -1
         for i, g in enumerate(groups):
@@ -167,9 +174,10 @@ class GroupsDialog(QDialog):
             self._list.addItem(item)
             if g.id == select_id:
                 row_to_select = i
-        self._list.blockSignals(False)
         if row_to_select >= 0:
             self._list.setCurrentRow(row_to_select)
+        self._list.blockSignals(False)
+        if row_to_select >= 0:
             self._load_selected()
         else:
             self._group = None
@@ -196,7 +204,7 @@ class GroupsDialog(QDialog):
         if group.id != self._selected_id():
             return  # selection moved on while loading
         self._group = group
-        controls = gl.detail_controls(group)
+        controls = gl.detail_controls(group, self._roles.get(group.id))
         self._title.setText(f"{group.name}  (owner: {group.owner})")
         self._members.clear()
         for m in group.members:
@@ -224,7 +232,8 @@ class GroupsDialog(QDialog):
             return
         name, problem = gl.validate_group_name(raw)
         if problem:
-            return self._invalid(problem)
+            self._invalid(problem)
+            return
         self._call(
             lambda: self._client.create_group(name),
             lambda g: self.reload(g.id),
@@ -238,7 +247,8 @@ class GroupsDialog(QDialog):
             return
         code, problem = gl.validate_invite_code(raw)
         if problem:
-            return self._invalid(problem)
+            self._invalid(problem)
+            return
         if not askUser(gl.JOIN_CONFIRMATION, parent=self, title=TITLE):
             return
         self._call(
@@ -297,7 +307,8 @@ class GroupsDialog(QDialog):
             return
         username, problem = gl.validate_username(raw)
         if problem:
-            return self._invalid(problem)
+            self._invalid(problem)
+            return
         self._call(
             lambda: self._client.allow_username(group.id, username),
             lambda _: self.reload(group.id),
@@ -312,7 +323,8 @@ class GroupsDialog(QDialog):
             return
         username = item.text()
         if not gl.can_remove_allowed(group, username):
-            return self._invalid("You can't remove the owner from the allowed list.")
+            self._invalid("You can't remove the owner from the allowed list.")
+            return
         if not askUser(
             gl.remove_allowed_confirmation(group, username), parent=self, title=TITLE
         ):
@@ -333,7 +345,8 @@ class GroupsDialog(QDialog):
             return
         name, problem = gl.validate_group_name(raw)
         if problem:
-            return self._invalid(problem)
+            self._invalid(problem)
+            return
         self._call(
             lambda: self._client.rename_group(group.id, name),
             lambda _: self.reload(group.id),
@@ -347,7 +360,8 @@ class GroupsDialog(QDialog):
             return
         candidates = gl.transfer_candidates(group)
         if not candidates:
-            return self._invalid("No other member has joined this group yet.")
+            self._invalid("No other member has joined this group yet.")
+            return
         username, ok = QInputDialog.getItem(
             self, TITLE, "New owner", candidates, 0, False
         )
@@ -374,9 +388,8 @@ class GroupsDialog(QDialog):
         if typed is None:
             return
         if not gl.delete_confirmed(group, typed):
-            return self._invalid(
-                "That didn't match the group name; nothing was deleted."
-            )
+            self._invalid("That didn't match the group name; nothing was deleted.")
+            return
         self._call(
             lambda: self._client.delete_group(group.id),
             lambda _: self._after_removal(),

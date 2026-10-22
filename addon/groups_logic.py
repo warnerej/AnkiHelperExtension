@@ -9,6 +9,7 @@ from .errors import AnkiHelperError, ApiError, NetworkError
 from .models import Group
 from .settings import USERNAME_RE
 
+OWNER = "owner"
 MAX_GROUP_NAME = 50
 
 JOIN_CONFIRMATION = (
@@ -55,13 +56,14 @@ class DetailControls:
     invite_code: bool
 
 
-def detail_controls(group: Group) -> DetailControls:
-    """Owners are recognised by the server only sending them the invite code."""
-    owner = group.invite_code is not None
-    return DetailControls(
-        leave=not owner,
-        invite_code=owner,
-    )
+def detail_controls(group: Group, role: str | None = None) -> DetailControls:
+    """Owner controls follow the role the group list reports for the viewer.
+
+    Without a role (not in the list yet), fall back to the server only sending
+    the invite code to owners.
+    """
+    owner = group.invite_code is not None if role is None else role == OWNER
+    return DetailControls(leave=not owner, invite_code=owner)
 
 
 def transfer_candidates(group: Group) -> list[str]:

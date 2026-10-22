@@ -27,6 +27,13 @@ def test_owner_controls():
     assert c.invite_code
 
 
+def test_role_from_the_list_wins_over_the_invite_code_heuristic():
+    owner = gl.detail_controls(make_group(owner_view=False), "owner")
+    assert owner.invite_code and not owner.leave
+    member = gl.detail_controls(make_group(owner_view=True), "member")
+    assert member.leave and not member.invite_code
+
+
 def test_member_controls():
     c = gl.detail_controls(make_group(owner_view=False))
     assert c.leave
