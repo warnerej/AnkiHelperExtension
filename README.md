@@ -14,6 +14,10 @@ An Anki add-on that turns private study stats into a shared, social progress vie
 | --- | --- |
 | ![My heatmap](docs/images/heatmap-mine.png) | ![Groups heatmap](docs/images/heatmap-groups.png) |
 
+## What is shared
+
+Sharing is opt-in: nothing is uploaded until you accept the consent dialog, and you can stop any time from Tools > AnkiHelper > Sharing. Uploaded: email, username, and per day for the last 365 days the review count, retention and minutes studied. Members of groups you join see your username and those stats. Card contents, deck names and review times are never uploaded. See the [privacy policy](docs/PRIVACY.md) and [terms](docs/TERMS.md).
+
 ## How it works
 
 ```mermaid
